@@ -1,0 +1,18 @@
+env: "local"
+
+http:
+  port: "8080"
+  timeout: "4s"
+  idle_timeout: "60s"
+
+logger:
+  level: "debug"
+
+postgres:
+  pool_max: 10
+
+minio:
+  bucket_name: "homeworks"
+  use_ssl: false
+
+super_admin_id: 0
