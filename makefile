@@ -4,6 +4,8 @@ dc-up:
 dc-down:
 	docker-compose down
 
-
 migrations:
-	//TODO: add bash command for migrations DB
+	cat migrations/0001_init_schema.sql | docker exec -i telegram_bot_senya-postgres-1 psql -U postgres -d telegram_bot
+
+ds_pg:
+	docker exec -it telegram_bot_senya-postgres-1 psql -U postgres -d telegram_bot
