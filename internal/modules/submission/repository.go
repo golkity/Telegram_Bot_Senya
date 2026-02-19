@@ -1,0 +1,139 @@
+package submission
+
+import (
+	"context"
+	"errors"
+	"fmt"
+	"telegram_bot/pkg/postgres"
+
+	"github.com/jackc/pgx/v5"
+)
+
+type Repository interface {
+	Save(ctx context.Context, sub Submission) error
+	GetAllByUserID(ctx context.Context, userID int64) ([]Submission, error)
+	GetByTask(ctx context.Context, userID int64, subType Type, taskNum string) ([]Submission, error)
+	GetByID(ctx context.Context, id int64) (*Submission, error)
+}
+
+type repo struct {
+	db *postgres.Client
+}
+
+func NewRepo(db *postgres.Client) Repository {
+	return &repo{db: db}
+}
+
+func (r *repo) Save(ctx context.Context, s Submission) error {
+	q := `
+       INSERT INTO submissions (
+          user_id, 
+          curator_id,
+          submission_type, 
+          task_number, 
+          file_paths, 
+          original_names, 
+          comment, 
+          submission_date
+       )
+       VALUES ($1, $2, $3, $4, $5, $6, $7, NOW())
+    `
+
+	_, err := r.db.Pool.Exec(ctx, q,
+		s.UserID,
+		s.CuratorID,
+		s.Type,
+		s.TaskNumber,
+		s.FilePaths,
+		s.OriginalNames,
+		s.Comment,
+	)
+
+	if err != nil {
+		return fmt.Errorf("failed to save submission to db: %w", err)
+	}
+
+	return nil
+}
+
+func (r *repo) GetAllByUserID(ctx context.Context, userID int64) ([]Submission, error) {
+	q := `
+       SELECT id, user_id, curator_id, submission_type, task_number, comment, submission_date, file_paths, original_names
+       FROM submissions 
+       WHERE user_id = $1 
+       ORDER BY submission_date DESC
+    `
+	rows, err := r.db.Pool.Query(ctx, q, userID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var subs []Submission
+	for rows.Next() {
+		var s Submission
+		var curID *int64
+
+		if err := rows.Scan(
+			&s.ID, &s.UserID, &curID, &s.Type, &s.TaskNumber, &s.Comment, &s.SubmittedAt, &s.FilePaths, &s.OriginalNames,
+		); err != nil {
+			return nil, err
+		}
+		if curID != nil {
+			s.CuratorID = *curID
+		}
+		subs = append(subs, s)
+	}
+	return subs, nil
+}
+
+func (r *repo) GetByTask(ctx context.Context, userID int64, subType Type, taskNum string) ([]Submission, error) {
+	q := `
+       SELECT id, user_id, submission_type, task_number, submitted_at 
+       FROM submissions 
+       WHERE user_id = $1 AND submission_type = $2 AND task_number = $3
+       ORDER BY submission_date DESC
+    `
+	rows, err := r.db.Pool.Query(ctx, q, userID, subType, taskNum)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var subs []Submission
+	for rows.Next() {
+		var s Submission
+
+		if err := rows.Scan(&s.ID, &s.UserID, &s.Type, &s.TaskNumber, &s.SubmittedAt); err != nil {
+			return nil, err
+		}
+		subs = append(subs, s)
+	}
+	return subs, nil
+}
+
+func (r *repo) GetByID(ctx context.Context, id int64) (*Submission, error) {
+	q := `
+       SELECT id, user_id, curator_id, submission_type, task_number, file_paths, original_names, comment, submission_date 
+       FROM submissions 
+       WHERE id = $1
+    `
+	var s Submission
+	var curID *int64
+	err := r.db.Pool.QueryRow(ctx, q, id).Scan(
+		&s.ID, &s.UserID, &curID, &s.Type, &s.TaskNumber,
+		&s.FilePaths, &s.OriginalNames,
+		&s.Comment, &s.SubmittedAt,
+	)
+
+	if err != nil {
+		if errors.Is(err, pgx.ErrNoRows) {
+			return nil, fmt.Errorf("submission not found")
+		}
+		return nil, err
+	}
+	if curID != nil {
+		s.CuratorID = *curID
+	}
+	return &s, nil
+}
