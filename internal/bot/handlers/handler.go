@@ -1,0 +1,187 @@
+package handlers
+
+import (
+	"context"
+	"log/slog"
+	"telegram_bot/internal/infra/word"
+	"telegram_bot/internal/modules/cms"
+
+	"telegram_bot/internal/bot/keyboards"
+	"telegram_bot/internal/modules/report"
+	"telegram_bot/internal/modules/submission"
+	"telegram_bot/internal/modules/user"
+
+	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
+)
+
+type Handler struct {
+	userSvc       *user.Service
+	submissionSvc *submission.Service
+	reportSvc     *report.Service
+	cmsSvc        *cms.Service
+
+	state StateContext
+	bot   *tgbotapi.BotAPI
+	log   *slog.Logger
+
+	wordGen *word.Generator
+}
+
+func NewHandler(
+	userSvc *user.Service,
+	submissionSvc *submission.Service,
+	reportSvc *report.Service,
+	cmsSvc *cms.Service,
+	state StateContext,
+	bot *tgbotapi.BotAPI,
+	log *slog.Logger,
+	wordGen *word.Generator,
+) *Handler {
+	return &Handler{
+		userSvc:       userSvc,
+		submissionSvc: submissionSvc,
+		reportSvc:     reportSvc,
+		cmsSvc:        cmsSvc,
+		state:         state,
+		bot:           bot,
+		log:           log,
+		wordGen:       wordGen,
+	}
+}
+
+func (h *Handler) SendMessage(chatID int64, text string, kb interface{}) {
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "HTML"
+	if kb != nil {
+		msg.ReplyMarkup = kb
+	}
+	if _, err := h.bot.Send(msg); err != nil {
+		h.log.Error("failed to send message", "chat_id", chatID, "error", err)
+	}
+}
+
+func (h *Handler) EditMessageText(chatID int64, messageID int, text string, kb interface{}) {
+	msg := tgbotapi.NewEditMessageText(chatID, messageID, text)
+	msg.ParseMode = "HTML"
+	if kb != nil {
+		if markup, ok := kb.(tgbotapi.InlineKeyboardMarkup); ok {
+			msg.ReplyMarkup = &markup
+		}
+	}
+	if _, err := h.bot.Send(msg); err != nil {
+		h.log.Error("failed to edit message", "chat_id", chatID, "msg_id", messageID, "error", err)
+	}
+}
+
+func (h *Handler) SendFile(chatID int64, fileData interface{}, fileName string, caption string) {
+	var fileRequest tgbotapi.Chattable
+
+	switch data := fileData.(type) {
+	case string:
+		doc := tgbotapi.NewDocument(chatID, tgbotapi.FileID(data))
+		doc.Caption = caption
+		fileRequest = doc
+	case []byte:
+		fileBytes := tgbotapi.FileBytes{
+			Name:  fileName,
+			Bytes: data,
+		}
+		doc := tgbotapi.NewDocument(chatID, fileBytes)
+		doc.Caption = caption
+		fileRequest = doc
+	}
+
+	if fileRequest != nil {
+		if _, err := h.bot.Send(fileRequest); err != nil {
+			h.log.Error("failed to send file", "chat_id", chatID, "error", err)
+		}
+	}
+}
+
+func (h *Handler) AnswerCallback(callbackID string, text string) {
+	resp := tgbotapi.NewCallback(callbackID, text)
+	if _, err := h.bot.Request(resp); err != nil {
+		h.log.Error("failed to answer callback", "callback_id", callbackID, "error", err)
+	}
+}
+
+func (h *Handler) HandleGenericText(ctx context.Context, msg *tgbotapi.Message) {
+	rawState := h.state.GetState(msg.From.ID)
+	state := UserState(rawState)
+
+	switch state {
+	case StateWaitingForTask:
+		h.HandleTaskSelection(ctx, msg)
+	case StateWaitingForSubtask:
+		h.HandleSubtaskSelection(ctx, msg)
+	case StateWaitingForComment:
+		h.HandleSubmissionFinalize(ctx, msg)
+	case StateWaitingForWeeklyReport:
+		h.HandleWeeklyReportText(ctx, msg)
+	case StateWaitingForCourseName:
+		h.HandleCourseCreationFlow(ctx, msg)
+	case StateWaitingForCourseSelection:
+		h.HandleStudentJoinCourse(ctx, msg)
+	case StateWaitingForCuratorSelection:
+		h.SendMessage(msg.Chat.ID, "Пожалуйста, используйте кнопки для выбора.", nil)
+	case StateWaitingForReminderText:
+		h.HandleCuratorSendReminderText(ctx, msg)
+	case StateWaitingForBotName, StateWaitingForWelcomeText, StateWaitingForReportTime:
+		h.HandleCustomizationText(ctx, msg)
+	case StateWaitingForDeleteInput:
+		h.HandleDeleteUserInput(ctx, msg)
+	case StateWaitingForInputUserStats:
+		h.SendMessage(msg.Chat.ID, "Поиск по тексту пока не реализован, используйте меню.", nil)
+	case StateWaitingForTransferSource:
+		h.HandleTransferSourceInput(ctx, msg)
+	case StateWaitingForTransferTarget:
+		h.HandleTransferTargetInput(ctx, msg)
+	default:
+		h.HandleUnknown(ctx, msg)
+	}
+}
+
+func (h *Handler) HandleWeeklyReportText(ctx context.Context, msg *tgbotapi.Message) {
+	reportText := msg.Text
+	h.log.Info("received weekly report", "user_id", msg.From.ID, "text", reportText)
+
+	h.state.ClearState(msg.From.ID)
+	h.SendMessage(msg.Chat.ID, "✅ Ваш еженедельный отчет принят и сохранен.", keyboards.StudentMenu)
+}
+
+func (h *Handler) HandleCourseCreationFlow(ctx context.Context, msg *tgbotapi.Message) {
+	courseName := msg.Text
+	h.log.Info("creating new course", "name", courseName)
+
+	h.state.ClearState(msg.From.ID)
+	h.SendMessage(msg.Chat.ID, "✅ Курс '"+courseName+"' успешно создан.", keyboards.AdminMenu)
+}
+
+func (h *Handler) HandleCuratorSendReminderText(ctx context.Context, msg *tgbotapi.Message) {
+	reminderText := msg.Text
+	curatorID := msg.From.ID
+
+	err := h.userSvc.BroadcastToStudents(ctx, curatorID, reminderText)
+	if err != nil {
+		h.log.Error("failed to broadcast reminder", "curator_id", curatorID, "error", err)
+		h.SendMessage(msg.Chat.ID, "❌ Ошибка при отправке рассылки.", nil)
+	} else {
+		h.SendMessage(msg.Chat.ID, "✅ Напоминание отправлено всем вашим студентам.", keyboards.CuratorMenu)
+	}
+
+	h.state.ClearState(curatorID)
+}
+
+func (h *Handler) HandleCustomizationText(ctx context.Context, msg *tgbotapi.Message) {
+	settingValue := msg.Text
+	state := h.state.GetState(msg.From.ID)
+
+	h.log.Info("updating bot customization", "admin_id", msg.From.ID, "state", state, "value", settingValue)
+
+	h.state.ClearState(msg.From.ID)
+	h.SendMessage(msg.Chat.ID, "✅ Настройки бота успешно обновлены.", keyboards.CustomizationMenu)
+}
+
+func (h *Handler) HandleUnknown(ctx context.Context, msg *tgbotapi.Message) {
+	h.SendMessage(msg.Chat.ID, "Я не понимаю это сообщение. Пожалуйста, используйте меню.", nil)
+}
