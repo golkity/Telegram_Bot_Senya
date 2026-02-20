@@ -119,6 +119,8 @@ func (h *Handler) HandleCuratorSelectionForStudent(ctx context.Context, msg *tgb
 
 	curators, err := h.userSvc.GetCuratorsByCourse(ctx, *u.CourseID)
 	if err != nil {
+		h.log.Error("failed to load curators", "course_id", *u.CourseID, "error", err)
+
 		h.SendMessage(msg.Chat.ID, "Ошибка загрузки кураторов.", nil)
 		return
 	}
