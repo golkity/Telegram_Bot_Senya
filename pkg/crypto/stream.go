@@ -46,3 +46,18 @@ func (r *ConcatReader) Read(p []byte) (n int, err error) {
 	r.pos += n
 	return n, nil
 }
+
+func DecryptStream(src io.Reader, key []byte) (io.Reader, error) {
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		return nil, err
+	}
+
+	iv := make([]byte, aes.BlockSize)
+	if _, err := io.ReadFull(src, iv); err != nil {
+		return nil, err
+	}
+
+	stream := cipher.NewCTR(block, iv)
+	return &cipher.StreamReader{S: stream, R: src}, nil
+}

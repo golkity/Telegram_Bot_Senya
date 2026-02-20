@@ -123,11 +123,13 @@ func (h *Handler) HandleGenericText(ctx context.Context, msg *tgbotapi.Message) 
 	case StateWaitingForCourseSelection:
 		h.HandleStudentJoinCourse(ctx, msg)
 	case StateWaitingForCuratorSelection:
-		h.SendMessage(msg.Chat.ID, "Пожалуйста, используйте кнопки для выбора.", nil)
+		h.HandleStudentJoinCurator(ctx, msg)
 	case StateWaitingForReminderText:
 		h.HandleCuratorSendReminderText(ctx, msg)
 	case StateWaitingForBotName, StateWaitingForWelcomeText, StateWaitingForReportTime:
 		h.HandleCustomizationText(ctx, msg)
+	case StateWaitingForFiles:
+		h.HandleFileUpload(ctx, msg)
 	case StateWaitingForDeleteInput:
 		h.HandleDeleteUserInput(ctx, msg)
 	case StateWaitingForInputUserStats:

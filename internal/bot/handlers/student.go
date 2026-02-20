@@ -94,3 +94,45 @@ func (h *Handler) HandleWeeklyReportSubmission(ctx context.Context, msg *tgbotap
 		keyboards.CancelButton,
 	)
 }
+
+func (h *Handler) HandleStudentJoinCurator(ctx context.Context, msg *tgbotapi.Message) {
+	text := msg.Text
+	curatorName := strings.TrimPrefix(text, "👤 ")
+
+	u, err := h.userSvc.GetUserInfo(ctx, msg.From.ID)
+	if err != nil || u == nil || u.CourseID == nil {
+		h.SendMessage(msg.Chat.ID, "❌ Произошла ошибка. Начните заново: /start", nil)
+		return
+	}
+
+	curators, err := h.userSvc.GetCuratorsByCourse(ctx, *u.CourseID)
+	if err != nil {
+		h.SendMessage(msg.Chat.ID, "❌ Ошибка при поиске кураторов.", nil)
+		return
+	}
+
+	var targetCuratorID int64
+	for _, c := range curators {
+		if c.FirstName == curatorName {
+			targetCuratorID = c.ID
+			break
+		}
+	}
+
+	if targetCuratorID == 0 {
+		h.SendMessage(msg.Chat.ID, "❌ Куратор не найден. Пожалуйста, используйте кнопки.", nil)
+		return
+	}
+
+	err = h.userSvc.AssignCurator(ctx, msg.From.ID, targetCuratorID, *u.CourseID)
+	if err != nil {
+		h.log.Error("failed to assign curator", "user_id", msg.From.ID, "error", err)
+		h.SendMessage(msg.Chat.ID, "❌ Ошибка при сохранении куратора.", nil)
+		return
+	}
+
+	h.state.ClearState(msg.From.ID)
+
+	h.SendMessage(msg.Chat.ID, "✅ Куратор успешно выбран!", nil)
+	h.SendMessage(msg.Chat.ID, fmt.Sprintf("👋 С возвращением, %s! Выбери действие:", u.FirstName), keyboards.StudentMenu)
+}

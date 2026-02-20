@@ -150,14 +150,45 @@ func (h *Handler) HandleFileUpload(_ context.Context, msg *tgbotapi.Message) {
 	h.SendMessage(msg.Chat.ID, fmt.Sprintf("📥 Файл принят! (Всего: %d)\nОтправьте еще или нажмите 'Готово'.", len(files)), nil)
 }
 
-func (h *Handler) HandleSubmissionDone(_ context.Context, msg *tgbotapi.Message) {
+func (h *Handler) HandleSubmissionDone(ctx context.Context, msg *tgbotapi.Message) {
 	rawFiles := h.state.GetData(msg.From.ID, "files")
-	files, ok := rawFiles.([]submission.FileDTO)
 
-	if !ok || len(files) == 0 {
+	if rawFiles == nil {
 		h.SendMessage(msg.Chat.ID, "❌ Вы не прикрепили ни одного файла. Сдача невозможна.", keyboards.SubmissionProcessMenu)
 		return
 	}
+
+	var files []submission.FileDTO
+
+	if f, ok := rawFiles.([]submission.FileDTO); ok {
+		files = f
+	} else if rawArray, ok := rawFiles.([]interface{}); ok {
+		for _, item := range rawArray {
+			if m, ok := item.(map[string]interface{}); ok {
+				var file submission.FileDTO
+
+				if fileID, ok := m["FileID"].(string); ok {
+					file.FileID = fileID
+				}
+				if fileName, ok := m["FileName"].(string); ok {
+					file.FileName = fileName
+				}
+				if sizeFloat, ok := m["Size"].(float64); ok {
+					file.Size = int64(sizeFloat)
+				}
+
+				files = append(files, file)
+			}
+		}
+	}
+
+	if len(files) == 0 {
+		h.log.Error("failed to parse files from state", "rawFiles_type", fmt.Sprintf("%T", rawFiles), "data", rawFiles)
+		h.SendMessage(msg.Chat.ID, "❌ Ошибка чтения файлов из памяти. Пожалуйста, начните сдачу заново.", keyboards.SubmissionProcessMenu)
+		return
+	}
+
+	h.state.SetData(msg.From.ID, "files", files)
 
 	h.state.SetState(msg.From.ID, StateWaitingForComment)
 	h.SendMessage(msg.Chat.ID, "📝 Напишите комментарий к работе или нажмите 'Пропустить'", keyboards.CommentMenu)
@@ -170,20 +201,82 @@ func (h *Handler) HandleSubmissionFinalize(ctx context.Context, msg *tgbotapi.Me
 		comment = ""
 	}
 
-	sType := h.state.GetData(userID, "type").(string)
-	task := h.state.GetData(userID, "task").(string)
-	curatorID := h.state.GetData(userID, "curator_id").(int64)
-	files := h.state.GetData(userID, "files").([]submission.FileDTO)
+	rawType := h.state.GetData(userID, "type")
+	sType := "homework"
+	if t, ok := rawType.(string); ok {
+		sType = t
+	}
+
+	rawTask := h.state.GetData(userID, "task")
+	task := ""
+	if t, ok := rawTask.(string); ok {
+		task = t
+	}
+
+	rawCurator := h.state.GetData(userID, "curator_id")
+	var curatorID int64 = 0
+	switch v := rawCurator.(type) {
+	case int64:
+		curatorID = v
+	case float64:
+		curatorID = int64(v)
+	}
+
+	var files []submission.FileDTO
+	rawFiles := h.state.GetData(userID, "files")
+
+	if f, ok := rawFiles.([]submission.FileDTO); ok {
+		files = f
+	} else if rawArray, ok := rawFiles.([]interface{}); ok {
+		for _, item := range rawArray {
+			if m, ok := item.(map[string]interface{}); ok {
+				var file submission.FileDTO
+				if fileID, ok := m["FileID"].(string); ok {
+					file.FileID = fileID
+				}
+				if fileName, ok := m["FileName"].(string); ok {
+					file.FileName = fileName
+				}
+				if sizeFloat, ok := m["Size"].(float64); ok {
+					file.Size = int64(sizeFloat)
+				}
+				files = append(files, file)
+			}
+		}
+	}
+
+	h.log.Info("Finalize submission", "files_count", len(files), "rawFiles_type", fmt.Sprintf("%T", rawFiles))
 
 	h.SendMessage(msg.Chat.ID, "⏳ Обрабатываю и сохраняю...", nil)
 
+	u, _ := h.userSvc.GetUserInfo(ctx, userID)
+	studentName := "Unknown_Student"
+	courseName := "Unknown_Course"
+	if u != nil {
+		studentName = strings.TrimSpace(u.FirstName + " " + u.LastName)
+		if u.CourseID != nil {
+			courseName = *u.CourseID
+		}
+	}
+
+	curatorName := "Unknown_Curator"
+	if curatorID != 0 {
+		c, _ := h.userSvc.GetUserInfo(ctx, curatorID)
+		if c != nil {
+			curatorName = strings.TrimSpace(c.FirstName + " " + c.LastName)
+		}
+	}
+
 	input := submission.InputDTO{
-		UserID:     userID,
-		CuratorID:  curatorID,
-		Type:       submission.Type(sType),
-		TaskNumber: task,
-		Comment:    comment,
-		Files:      files,
+		UserID:      userID,
+		CuratorID:   curatorID,
+		CourseName:  courseName,
+		CuratorName: curatorName,
+		StudentName: studentName,
+		Type:        submission.Type(sType),
+		TaskNumber:  task,
+		Comment:     comment,
+		Files:       files,
 	}
 
 	if err := h.submissionSvc.ProcessSubmission(ctx, input); err != nil {
@@ -191,9 +284,8 @@ func (h *Handler) HandleSubmissionFinalize(ctx context.Context, msg *tgbotapi.Me
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка сохранения. Попробуйте позже.", nil)
 	} else {
 		if curatorID != 0 && curatorID != userID {
-			u, _ := h.userSvc.GetUserInfo(ctx, userID)
-			notification := fmt.Sprintf("🔔 <b>Новая сдача!</b>\n👤 %s %s\n📚 %s: %s\n📎 Файлов: %d",
-				u.FirstName, u.LastName, sType, task, len(files))
+			notification := fmt.Sprintf("🔔 <b>Новая сдача!</b>\n👤 %s\n📚 %s: %s\n📎 Файлов: %d",
+				studentName, sType, task, len(files))
 
 			message := tgbotapi.NewMessage(curatorID, notification)
 			message.ParseMode = "HTML"
