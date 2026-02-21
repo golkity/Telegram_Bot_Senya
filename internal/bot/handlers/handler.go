@@ -2,6 +2,7 @@ package handlers
 
 import (
 	"context"
+	"fmt"
 	"log/slog"
 	"telegram_bot/internal/infra/word"
 	"telegram_bot/internal/modules/cms"
@@ -138,6 +139,45 @@ func (h *Handler) HandleGenericText(ctx context.Context, msg *tgbotapi.Message) 
 		h.HandleTransferSourceInput(ctx, msg)
 	case StateWaitingForTransferTarget:
 		h.HandleTransferTargetInput(ctx, msg)
+
+	case StateCMSWaitingBotName, StateCMSWaitingGreeting, StateCMSWaitingButtons,
+		StateCMSWaitingMessages, StateCMSWaitingReportTime, StateCMSWaitingReminderTime,
+		StateCMSWaitingCheckTime, StateCMSWaitingCuratorReportTime, StateCMSWaitingWeeklyDays:
+
+		keyToUpdate := ""
+		switch state {
+		case StateCMSWaitingBotName:
+			keyToUpdate = "bot_name"
+		case StateCMSWaitingGreeting:
+			keyToUpdate = "greeting_text"
+		case StateCMSWaitingButtons:
+			keyToUpdate = "button_texts"
+		case StateCMSWaitingMessages:
+			keyToUpdate = "system_messages"
+		case StateCMSWaitingReportTime:
+			keyToUpdate = "report_time"
+		case StateCMSWaitingReminderTime:
+			keyToUpdate = "reminder_time"
+		case StateCMSWaitingCheckTime:
+			keyToUpdate = "check_time"
+		case StateCMSWaitingCuratorReportTime:
+			keyToUpdate = "curator_report_time"
+		case StateCMSWaitingWeeklyDays:
+			keyToUpdate = "weekly_report_days"
+		}
+
+		newValue := msg.Text
+
+		err := h.cmsSvc.UpdateSetting(ctx, keyToUpdate, newValue)
+		if err != nil {
+			h.log.Error("failed to update cms setting", "key", keyToUpdate, "err", err)
+			h.SendMessage(msg.Chat.ID, "❌ Ошибка при сохранении настройки.", keyboards.CustomizationMenu)
+		} else {
+			h.SendMessage(msg.Chat.ID, fmt.Sprintf("✅ Настройка <b>%s</b> успешно обновлена!\n\n<i>Новое значение:</i> %s", keyToUpdate, newValue), keyboards.CustomizationMenu)
+		}
+
+		h.state.ClearState(msg.From.ID)
+
 	default:
 		h.HandleUnknown(ctx, msg)
 	}

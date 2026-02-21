@@ -105,13 +105,31 @@ func (h *Handler) HandleDeleteConfirm(ctx context.Context, msg *tgbotapi.Message
 	}
 
 	if msg.Text == "✅ Да, удалить" {
-		targetID := h.state.GetData(msg.From.ID, "delete_target_id").(int64)
+		rawID := h.state.GetData(msg.From.ID, "delete_target_id")
+		var targetID int64
+		switch v := rawID.(type) {
+		case int64:
+			targetID = v
+		case float64:
+			targetID = int64(v)
+		default:
+			h.log.Error("failed to parse delete_target_id from state", "rawID_type", fmt.Sprintf("%T", rawID))
+			h.SendMessage(msg.Chat.ID, "❌ Ошибка памяти. Попробуйте снова.", keyboards.UserManagementMenu)
+			return
+		}
+
+		students, _ := h.userSvc.GetStudentsByCurator(ctx, targetID)
 
 		err := h.userSvc.DeleteUser(ctx, targetID)
 		if err != nil {
-			h.SendMessage(msg.Chat.ID, "❌ Ошибка при удалении.", keyboards.UserManagementMenu)
+			h.log.Error("failed to delete user", "target_id", targetID, "error", err)
+			h.SendMessage(msg.Chat.ID, "❌ Ошибка при удалении. Проверьте логи сервера.", keyboards.UserManagementMenu)
 		} else {
 			h.SendMessage(msg.Chat.ID, "✅ Пользователь успешно удален.", keyboards.UserManagementMenu)
+
+			for _, student := range students {
+				h.SendMessage(student.ID, "⚠️ Ваш куратор был отстранен от курса.\nПожалуйста, отправьте команду /start, чтобы выбрать нового куратора!", nil)
+			}
 		}
 
 		h.state.ClearState(msg.From.ID)
@@ -165,23 +183,44 @@ func (h *Handler) HandleTransferConfirm(ctx context.Context, msg *tgbotapi.Messa
 		return
 	}
 
-	if msg.Text == "❌ Отмена" {
+	if msg.Text == "❌ Отмена" || msg.Text == "❌ Нет, отмена" {
 		h.state.ClearState(msg.From.ID)
 		h.SendMessage(msg.Chat.ID, "Перенос отменен.", keyboards.AdminMenu)
 		return
 	}
 
 	if msg.Text == "✅ Подтвердить перенос" {
-		sourceID := h.state.GetData(msg.From.ID, "transfer_source").(int64)
-		targetID := h.state.GetData(msg.From.ID, "transfer_target").(int64)
+		var sourceID int64
+		switch v := h.state.GetData(msg.From.ID, "transfer_source").(type) {
+		case int64:
+			sourceID = v
+		case float64:
+			sourceID = int64(v)
+		}
+
+		var targetID int64
+		switch v := h.state.GetData(msg.From.ID, "transfer_target").(type) {
+		case int64:
+			targetID = v
+		case float64:
+			targetID = int64(v)
+		}
+
+		if sourceID == 0 || targetID == 0 {
+			h.SendMessage(msg.Chat.ID, "❌ Ошибка чтения ID. Попробуйте снова.", keyboards.AdminMenu)
+			return
+		}
 
 		err := h.userSvc.TransferStudents(ctx, sourceID, targetID)
 		if err != nil {
-			h.SendMessage(msg.Chat.ID, "❌ Ошибка при переносе.", keyboards.AdminMenu)
+			h.log.Error("failed to transfer students", "source", sourceID, "target", targetID, "error", err)
+			h.SendMessage(msg.Chat.ID, "❌ Ошибка при переносе. Проверьте логи.", keyboards.AdminMenu)
 		} else {
 			h.SendMessage(msg.Chat.ID, fmt.Sprintf("✅ Заявка на перенос от %d к %d выполнена.", sourceID, targetID), keyboards.AdminMenu)
 		}
+
 		h.state.ClearState(msg.From.ID)
+		h.state.ClearData(msg.From.ID)
 	}
 }
 
@@ -292,5 +331,115 @@ func (h *Handler) HandleAdminStudentsByCourse(ctx context.Context, msg *tgbotapi
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
-	h.SendMessage(msg.Chat.ID, "Функция в разработке", nil)
+
+	statsText, err := h.userSvc.GetCourseStatisticsText(ctx)
+	if err != nil {
+		h.log.Error("failed to get course statistics", "error", err)
+		h.SendMessage(msg.Chat.ID, "❌ Ошибка при получении данных базы.", nil)
+		return
+	}
+
+	h.SendMessage(msg.Chat.ID, statsText, nil)
+}
+
+func (h *Handler) HandleAdminCuratorStudents(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+
+	statsText, err := h.userSvc.GetCuratorStatisticsText(ctx)
+	if err != nil {
+		h.log.Error("failed to get curator statistics", "error", err)
+		h.SendMessage(msg.Chat.ID, "❌ Ошибка при получении данных.", nil)
+		return
+	}
+
+	h.SendMessage(msg.Chat.ID, statsText, nil)
+}
+
+func (h *Handler) HandleCMSChangeBotName(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+	h.state.SetState(msg.From.ID, StateCMSWaitingBotName)
+	h.SendMessage(msg.Chat.ID, "Отправьте новое имя для бота:", keyboards.BackButton)
+}
+
+func (h *Handler) HandleCMSChangeGreeting(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+	h.state.SetState(msg.From.ID, StateCMSWaitingGreeting)
+	h.SendMessage(msg.Chat.ID, "Отправьте новый текст приветствия (/start):", keyboards.BackButton)
+}
+
+func (h *Handler) HandleCMSChangeButtons(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+	h.state.SetState(msg.From.ID, StateCMSWaitingButtons)
+	h.SendMessage(msg.Chat.ID, "Отправьте новые названия кнопок (в формате JSON или текст):", keyboards.BackButton)
+}
+
+func (h *Handler) HandleCMSChangeAllMessages(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+	h.state.SetState(msg.From.ID, StateCMSWaitingMessages)
+	h.SendMessage(msg.Chat.ID, "Отправьте новые системные сообщения:", keyboards.BackButton)
+}
+
+func (h *Handler) HandleCMSChangeReportTime(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+	h.state.SetState(msg.From.ID, StateCMSWaitingReportTime)
+	h.SendMessage(msg.Chat.ID, "Отправьте время для отчетов (МСК), например 20:00 :", keyboards.BackButton)
+}
+
+func (h *Handler) HandleCMSChangeReminderTime(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+	h.state.SetState(msg.From.ID, StateCMSWaitingReminderTime)
+	h.SendMessage(msg.Chat.ID, "Отправьте время для напоминаний (МСК), например 10:00 :", keyboards.BackButton)
+}
+
+func (h *Handler) HandleCMSChangeCheckTime(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+	h.state.SetState(msg.From.ID, StateCMSWaitingCheckTime)
+	h.SendMessage(msg.Chat.ID, "Отправьте время проверки работ (МСК):", keyboards.BackButton)
+}
+
+func (h *Handler) HandleCMSChangeCuratorReportTime(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+	h.state.SetState(msg.From.ID, StateCMSWaitingCuratorReportTime)
+	h.SendMessage(msg.Chat.ID, "Отправьте время отправки отчетов кураторам (МСК):", keyboards.BackButton)
+}
+
+func (h *Handler) HandleCMSChangeWeeklyReportDays(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+	h.state.SetState(msg.From.ID, StateCMSWaitingWeeklyDays)
+	h.SendMessage(msg.Chat.ID, "Отправьте дни для еженедельного отчета (например: 1,3,5):", keyboards.BackButton)
+}
+
+func (h *Handler) HandleCMSViewConfig(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+	settingsStr := "👁️ <b>Текущая конфигурация:</b>\n\n<i>(Функция вывода настроек из базы в разработке)</i>"
+	h.SendMessage(msg.Chat.ID, settingsStr, nil)
+}
+
+func (h *Handler) HandleCMSResetConfig(ctx context.Context, msg *tgbotapi.Message) {
+	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+	h.SendMessage(msg.Chat.ID, "🔄 Функция сброса настроек в разработке.", nil)
 }

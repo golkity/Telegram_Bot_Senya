@@ -42,6 +42,16 @@ const (
 	StateWaitingForTransferSource
 	StateWaitingForTransferTarget
 	StateWaitingForTransferConfirm
+
+	StateCMSWaitingBotName
+	StateCMSWaitingGreeting
+	StateCMSWaitingButtons
+	StateCMSWaitingMessages
+	StateCMSWaitingReportTime
+	StateCMSWaitingReminderTime
+	StateCMSWaitingCheckTime
+	StateCMSWaitingCuratorReportTime
+	StateCMSWaitingWeeklyDays
 )
 
 type StateContext interface {

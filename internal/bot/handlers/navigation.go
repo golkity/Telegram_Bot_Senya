@@ -8,6 +8,18 @@ import (
 )
 
 func (h *Handler) HandleBack(ctx context.Context, msg *tgbotapi.Message) {
+	rawState := h.state.GetState(msg.From.ID)
+	state := UserState(rawState)
+
+	switch state {
+	case StateCMSWaitingBotName, StateCMSWaitingGreeting, StateCMSWaitingButtons,
+		StateCMSWaitingMessages, StateCMSWaitingReportTime, StateCMSWaitingReminderTime,
+		StateCMSWaitingCheckTime, StateCMSWaitingCuratorReportTime, StateCMSWaitingWeeklyDays:
+
+		h.HandleBackToCustomization(ctx, msg)
+		return
+	}
+
 	h.state.ClearState(msg.From.ID)
 	h.state.ClearData(msg.From.ID)
 
