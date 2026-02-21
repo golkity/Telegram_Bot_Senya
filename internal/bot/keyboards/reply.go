@@ -70,7 +70,6 @@ var AdminMenu = tgbotapi.NewReplyKeyboard(
 	),
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("📚 Ученики по курсам"),
-		tgbotapi.NewKeyboardButton("↩️ Назад в меню"),
 	),
 )
 
