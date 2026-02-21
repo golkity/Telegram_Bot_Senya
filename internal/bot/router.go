@@ -182,7 +182,30 @@ func (r *Router) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 		r.handler.HandleAdminCuratorStats(ctx, msg)
 	case "📚 Ученики по курсам":
 		r.handler.HandleAdminStudentsByCourse(ctx, msg)
-
+	case "👨‍🏫 Ученики кураторов":
+		r.handler.HandleAdminCuratorStudents(ctx, msg)
+	case "✏️ Изменить имя бота":
+		r.handler.HandleCMSChangeBotName(ctx, msg)
+	case "✏️ Изменить приветствие":
+		r.handler.HandleCMSChangeGreeting(ctx, msg)
+	case "✏️ Изменить тексты кнопок":
+		r.handler.HandleCMSChangeButtons(ctx, msg)
+	case "✏️ Изменить все сообщения":
+		r.handler.HandleCMSChangeAllMessages(ctx, msg)
+	case "⏰ Время отчета (МСК)":
+		r.handler.HandleCMSChangeReportTime(ctx, msg)
+	case "⏰ Время напоминаний (МСК)":
+		r.handler.HandleCMSChangeReminderTime(ctx, msg)
+	case "⏰ Время проверки (МСК)":
+		r.handler.HandleCMSChangeCheckTime(ctx, msg)
+	case "⏰ Время отчетов кураторам (МСК)":
+		r.handler.HandleCMSChangeCuratorReportTime(ctx, msg)
+	case "📅 Дни еженедельного отчета":
+		r.handler.HandleCMSChangeWeeklyReportDays(ctx, msg)
+	case "👁️ Просмотреть конфигурацию":
+		r.handler.HandleCMSViewConfig(ctx, msg)
+	case "🔄 Сбросить настройки":
+		r.handler.HandleCMSResetConfig(ctx, msg)
 	case "🗑️ Удалить пользователя":
 		r.handler.HandleStartDeleteUser(ctx, msg)
 	case "📊 Статистика пользователя":
