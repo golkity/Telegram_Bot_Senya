@@ -13,6 +13,7 @@ type Repository interface {
 	GetByKey(ctx context.Context, key string) (string, error)
 	Update(ctx context.Context, key string, value string) error
 	GetAll(ctx context.Context) ([]Content, error)
+	UpdateSetting(ctx context.Context, key string, content string) error
 }
 
 type repo struct {
@@ -63,4 +64,18 @@ func (r *repo) GetAll(ctx context.Context) ([]Content, error) {
 		contents = append(contents, c)
 	}
 	return contents, nil
+}
+
+func (r *repo) UpdateSetting(ctx context.Context, key string, content string) error {
+	q := `
+		INSERT INTO cms_contents (key, content)
+		VALUES ($1, $2)
+		ON CONFLICT (key) DO UPDATE 
+		SET content = EXCLUDED.content
+	`
+	_, err := r.db.Pool.Exec(ctx, q, key, content)
+	if err != nil {
+		return fmt.Errorf("failed to upsert cms setting %s: %w", key, err)
+	}
+	return nil
 }
