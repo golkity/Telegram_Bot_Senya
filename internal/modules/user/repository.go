@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"strings"
+	"telegram_bot/internal/modules/report"
 	"telegram_bot/pkg/postgres"
 	"time"
 
@@ -35,6 +36,7 @@ type Repository interface {
 	TransferStudents(ctx context.Context, sourceCuratorID, targetCuratorID int64) error
 	GetStudentsCountByCourse(ctx context.Context) (map[string]int, error)
 	GetStudentsCountByCurator(ctx context.Context) (map[string]int, error)
+	GetUsersStatsReport(ctx context.Context, courseID string) ([]report.UserStat, error)
 }
 
 type repo struct {
@@ -414,6 +416,56 @@ func (r *repo) GetStudentsCountByCurator(ctx context.Context) (map[string]int, e
 			return nil, err
 		}
 		stats[strings.TrimSpace(curatorName)] = count
+	}
+
+	return stats, nil
+}
+
+func (r *repo) GetUsersStatsReport(ctx context.Context, courseID string) ([]report.UserStat, error) {
+	q := `
+		SELECT 
+			u.user_id, 
+			TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS name,
+			COALESCE(ur.role, 'student') AS role,
+			COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
+			COUNT(s.id) AS total_files,
+			u.registration_date
+		FROM users u
+		LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+		LEFT JOIN submissions s ON u.user_id = s.user_id
+		WHERE ($1::text = '' OR ur.course_id = $1)
+		GROUP BY u.user_id, u.first_name, u.last_name, ur.role, u.registration_date
+		ORDER BY ur.role, u.registration_date DESC
+	`
+
+	rows, err := r.db.Pool.Query(ctx, q, courseID)
+	if err != nil {
+		return nil, fmt.Errorf("db get users stats error: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []report.UserStat
+	for rows.Next() {
+		var stat report.UserStat
+		var name string
+
+		if err := rows.Scan(
+			&stat.UserID,
+			&name,
+			&stat.Role,
+			&stat.HomeworkCount,
+			&stat.FilesCount,
+			&stat.RegisteredAt,
+		); err != nil {
+			continue
+		}
+
+		if name == "" {
+			name = "Без имени"
+		}
+		stat.Name = name
+
+		stats = append(stats, stat)
 	}
 
 	return stats, nil

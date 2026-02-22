@@ -194,36 +194,6 @@ func (s *Service) TransferStudents(ctx context.Context, sourceID, targetID int64
 	return nil
 }
 
-func (s *Service) GetStats(ctx context.Context, courseID string) ([]report.UserStat, error) {
-	users, err := s.repo.GetAll(ctx)
-	if err != nil {
-		return nil, err
-	}
-
-	var stats []report.UserStat
-	for _, u := range users {
-		if u.Role != RoleStudent {
-			continue
-		}
-
-		dailyStat, _ := s.repo.GetDailyStat(ctx, u.ID, time.Now())
-
-		stat := report.UserStat{
-			UserID:        u.ID,
-			Name:          u.FirstName + " " + u.LastName,
-			Role:          string(u.Role),
-			RegisteredAt:  u.RegisteredAt,
-			HomeworkCount: 0,
-			FilesCount:    0,
-		}
-		if dailyStat != nil {
-			stat.FilesCount = dailyStat.TotalFilesToday
-		}
-		stats = append(stats, stat)
-	}
-	return stats, nil
-}
-
 func (s *Service) GetCourseStatisticsText(ctx context.Context) (string, error) {
 	stats, err := s.repo.GetStudentsCountByCourse(ctx)
 	if err != nil {
@@ -268,4 +238,8 @@ func (s *Service) GetCuratorStatisticsText(ctx context.Context) (string, error) 
 	text += fmt.Sprintf("\n📊 <b>Всего распределено:</b> %d", total)
 
 	return text, nil
+}
+
+func (s *Service) GetStats(ctx context.Context, courseID string) ([]report.UserStat, error) {
+	return s.repo.GetUsersStatsReport(ctx, courseID)
 }
