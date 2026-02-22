@@ -232,14 +232,13 @@ func (s *Service) MigrateStudentFiles(ctx context.Context, studentID int64, newC
 					parts[1] = safeNewCurator
 					newPath := strings.Join(parts, "/")
 
-					// Двигаем в S3
 					err := s.uploader.MoveFile(ctx, oldPath, newPath)
 					if err == nil {
 						updatedPaths = append(updatedPaths, newPath)
 						changed = true
 					} else {
 						s.log.Error("s3 migration failed", "old", oldPath, "err", err)
-						updatedPaths = append(updatedPaths, oldPath) // Оставляем старый путь при ошибке
+						updatedPaths = append(updatedPaths, oldPath)
 					}
 				} else {
 					updatedPaths = append(updatedPaths, oldPath)
