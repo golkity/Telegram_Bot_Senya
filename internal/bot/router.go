@@ -145,12 +145,10 @@ func (r *Router) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 
 	case "📝 Отправить напоминание":
 		r.handler.HandleCuratorReminder(ctx, msg)
-	case "📊 Ежедневный отчет":
+	case "📊 Мой ежедневный отчет":
 		r.handler.HandleCuratorDailyReport(ctx, msg)
-	case "📈 Еженедельный отчет":
+	case "📈 Мой еженедельный отчет":
 		r.handler.HandleCuratorWeeklyReport(ctx, msg)
-	case "📋 Word отчет (еженедельный)":
-		r.handler.HandleWordReport(ctx, msg)
 	case "📋 Отчет по сдаче (Excel)":
 		r.handler.HandleSubmissionReportExcel(ctx, msg)
 	case "👤 Мои ученики":
@@ -160,7 +158,7 @@ func (r *Router) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 	case "📁 Просмотреть работы учеников":
 		r.handler.HandleViewStudentWorks(ctx, msg)
 
-	case "📈 Ежедневный отчет (Админ)":
+	case "📈 Общий ежедневный отчет":
 		r.handler.HandleAdminDailyReport(ctx, msg)
 	case "📋Подробный отчет Excel":
 		r.handler.HandleAdminDetailedExcel(ctx, msg)

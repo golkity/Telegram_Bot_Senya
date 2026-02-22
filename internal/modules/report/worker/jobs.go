@@ -30,9 +30,6 @@ func ProcessReportJob(
 ) {
 	log.Info("worker started processing report", "admin_id", task.AdminChatID, "type", task.ReportType)
 
-	// В будущем здесь можно добавить switch по task.ReportType
-	// Сейчас обрабатываем логику для Excel отчета по умолчанию
-
 	data, err := provider.GetStats(ctx, task.CourseID)
 	if err != nil {
 		log.Error("failed to fetch stats", "error", err)

@@ -23,10 +23,10 @@ var StudentMenu = tgbotapi.NewReplyKeyboard(
 var CuratorMenu = tgbotapi.NewReplyKeyboard(
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("📝 Отправить напоминание"),
-		tgbotapi.NewKeyboardButton("📊 Ежедневный отчет"),
+		tgbotapi.NewKeyboardButton("📊 Мой ежедневный отчет"),
 	),
 	tgbotapi.NewKeyboardButtonRow(
-		tgbotapi.NewKeyboardButton("📈 Еженедельный отчет"),
+		tgbotapi.NewKeyboardButton("📈 Мой еженедельный отчет"),
 		tgbotapi.NewKeyboardButton("📋 Word отчет (еженедельный)"),
 	),
 	tgbotapi.NewKeyboardButtonRow(
@@ -41,12 +41,12 @@ var CuratorMenu = tgbotapi.NewReplyKeyboard(
 
 var AdminMenu = tgbotapi.NewReplyKeyboard(
 	tgbotapi.NewKeyboardButtonRow(
-		tgbotapi.NewKeyboardButton("📈 Ежедневный отчет"),
-		tgbotapi.NewKeyboardButton("📊 Еженедельный отчет"),
+		tgbotapi.NewKeyboardButton("📈 Общий ежедневный отчет"),
+		tgbotapi.NewKeyboardButton("📊 Общий еженедельный отчет"),
 	),
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("📋Подробный отчет Excel"),
-		tgbotapi.NewKeyboardButton("📋 Word отчет (еженедельный)"),
+		//tgbotapi.NewKeyboardButton("📋 Word отчет (еженедельный)"),
 	),
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("📋 Отчет по сдаче (Excel)"),
@@ -66,7 +66,7 @@ var AdminMenu = tgbotapi.NewReplyKeyboard(
 	),
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("👨‍🏫 Ученики кураторов"),
-		tgbotapi.NewKeyboardButton("📊 Статистика кураторов"),
+		//tgbotapi.NewKeyboardButton("📊 Статистика кураторов"),
 	),
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("📚 Ученики по курсам"),
