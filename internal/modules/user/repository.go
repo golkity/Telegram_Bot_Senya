@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strings"
 	"telegram_bot/pkg/postgres"
 	"time"
 
@@ -32,6 +33,8 @@ type Repository interface {
 
 	Delete(ctx context.Context, userID int64) error
 	TransferStudents(ctx context.Context, sourceCuratorID, targetCuratorID int64) error
+	GetStudentsCountByCourse(ctx context.Context) (map[string]int, error)
+	GetStudentsCountByCurator(ctx context.Context) (map[string]int, error)
 }
 
 type repo struct {
@@ -312,13 +315,21 @@ func (r *repo) Delete(ctx context.Context, userID int64) error {
 	}
 	defer tx.Rollback(ctx)
 
+	_, err = tx.Exec(ctx, `UPDATE user_roles SET curator_id = NULL WHERE curator_id = $1`, userID)
+	if err != nil {
+		return fmt.Errorf("failed to unlink students: %w", err)
+	}
+
 	_, err = tx.Exec(ctx, `DELETE FROM user_roles WHERE user_id = $1`, userID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to delete user role: %w", err)
 	}
+
+	_, _ = tx.Exec(ctx, `UPDATE submissions SET curator_id = NULL WHERE curator_id = $1`, userID)
+
 	_, err = tx.Exec(ctx, `DELETE FROM users WHERE user_id = $1`, userID)
 	if err != nil {
-		return err
+		return fmt.Errorf("failed to delete user: %w", err)
 	}
 
 	return tx.Commit(ctx)
@@ -328,4 +339,82 @@ func (r *repo) TransferStudents(ctx context.Context, sourceCuratorID, targetCura
 	query := `UPDATE user_roles SET curator_id = $1 WHERE curator_id = $2`
 	_, err := r.db.Pool.Exec(ctx, query, targetCuratorID, sourceCuratorID)
 	return err
+}
+
+func (r *repo) GetStudentsByCurator(ctx context.Context, curatorID int64) ([]int64, error) {
+	q := `SELECT user_id FROM user_roles WHERE curator_id = $1`
+	rows, err := r.db.Pool.Query(ctx, q, curatorID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var ids []int64
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err == nil {
+			ids = append(ids, id)
+		}
+	}
+	return ids, nil
+}
+
+func (r *repo) GetStudentsCountByCourse(ctx context.Context) (map[string]int, error) {
+	q := `
+		SELECT COALESCE(c.course_name, ur.course_id, 'Неизвестный курс'), COUNT(ur.user_id)
+		FROM user_roles ur
+		LEFT JOIN courses c ON ur.course_id = c.course_id
+		WHERE ur.role = 'student' AND ur.course_id IS NOT NULL
+		GROUP BY c.course_name, ur.course_id
+		ORDER BY COUNT(ur.user_id) DESC
+	`
+
+	rows, err := r.db.Pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("db get students count by course error: %w", err)
+	}
+	defer rows.Close()
+
+	stats := make(map[string]int)
+	for rows.Next() {
+		var courseName string
+		var count int
+		if err := rows.Scan(&courseName, &count); err != nil {
+			return nil, err
+		}
+		stats[courseName] = count
+	}
+
+	return stats, nil
+}
+
+func (r *repo) GetStudentsCountByCurator(ctx context.Context) (map[string]int, error) {
+	q := `
+		SELECT 
+			COALESCE(curator.first_name || ' ' || curator.last_name, 'Без имени (ID: ' || ur.curator_id || ')'),
+			COUNT(ur.user_id)
+		FROM user_roles ur
+		JOIN users curator ON ur.curator_id = curator.user_id
+		WHERE ur.role = 'student' AND ur.curator_id IS NOT NULL
+		GROUP BY curator.first_name, curator.last_name, ur.curator_id
+		ORDER BY COUNT(ur.user_id) DESC
+	`
+
+	rows, err := r.db.Pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("db get students count by curator error: %w", err)
+	}
+	defer rows.Close()
+
+	stats := make(map[string]int)
+	for rows.Next() {
+		var curatorName string
+		var count int
+		if err := rows.Scan(&curatorName, &count); err != nil {
+			return nil, err
+		}
+		stats[strings.TrimSpace(curatorName)] = count
+	}
+
+	return stats, nil
 }
