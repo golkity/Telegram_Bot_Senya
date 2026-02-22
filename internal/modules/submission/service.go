@@ -23,6 +23,7 @@ type FileUploader interface {
 	UploadFile(ctx context.Context, objectName string, reader io.Reader, size int64, contentType string) error
 	GetPresignedURL(ctx context.Context, objectName string, lifetime time.Duration) (string, error)
 	DownloadFile(ctx context.Context, objectName string) (io.ReadCloser, error)
+	MoveFile(ctx context.Context, oldKey, newKey string) error
 }
 
 type FileDownloader interface {
@@ -209,4 +210,51 @@ func (s *Service) GenerateUserArchive(ctx context.Context, userID int64) (string
 	}
 
 	return s.uploader.GetPresignedURL(ctx, archivePath, 24*time.Hour)
+}
+
+func (s *Service) MigrateStudentFiles(ctx context.Context, studentID int64, newCuratorID int64, newCuratorName string) error {
+	submissions, err := s.GetAllSubmissions(ctx, studentID)
+	if err != nil {
+		return err
+	}
+
+	safeNewCurator := strings.ReplaceAll(newCuratorName, " ", "_")
+
+	for _, sub := range submissions {
+		var updatedPaths []string
+		changed := false
+
+		for _, oldPath := range sub.FilePaths {
+			parts := strings.Split(oldPath, "/")
+			if len(parts) >= 5 {
+
+				if parts[1] != safeNewCurator {
+					parts[1] = safeNewCurator
+					newPath := strings.Join(parts, "/")
+
+					// Двигаем в S3
+					err := s.uploader.MoveFile(ctx, oldPath, newPath)
+					if err == nil {
+						updatedPaths = append(updatedPaths, newPath)
+						changed = true
+					} else {
+						s.log.Error("s3 migration failed", "old", oldPath, "err", err)
+						updatedPaths = append(updatedPaths, oldPath) // Оставляем старый путь при ошибке
+					}
+				} else {
+					updatedPaths = append(updatedPaths, oldPath)
+				}
+			} else {
+				updatedPaths = append(updatedPaths, oldPath)
+			}
+		}
+
+		if changed {
+			err = s.repo.UpdatePathsAndCurator(ctx, sub.ID, newCuratorID, updatedPaths)
+			if err != nil {
+				s.log.Error("db path update failed", "sub_id", sub.ID, "err", err)
+			}
+		}
+	}
+	return nil
 }

@@ -14,6 +14,7 @@ type Repository interface {
 	GetAllByUserID(ctx context.Context, userID int64) ([]Submission, error)
 	GetByTask(ctx context.Context, userID int64, subType Type, taskNum string) ([]Submission, error)
 	GetByID(ctx context.Context, id int64) (*Submission, error)
+	UpdatePathsAndCurator(ctx context.Context, subID int64, newCuratorID int64, newPaths []string) error
 }
 
 type repo struct {
@@ -136,4 +137,14 @@ func (r *repo) GetByID(ctx context.Context, id int64) (*Submission, error) {
 		s.CuratorID = *curID
 	}
 	return &s, nil
+}
+
+func (r *repo) UpdatePathsAndCurator(ctx context.Context, subID int64, newCuratorID int64, newPaths []string) error {
+	q := `
+		UPDATE submissions 
+		SET curator_id = $1, file_paths = $2 
+		WHERE id = $3
+	`
+	_, err := r.db.Pool.Exec(ctx, q, newCuratorID, newPaths, subID)
+	return err
 }
