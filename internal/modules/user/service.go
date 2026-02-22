@@ -223,3 +223,49 @@ func (s *Service) GetStats(ctx context.Context, courseID string) ([]report.UserS
 	}
 	return stats, nil
 }
+
+func (s *Service) GetCourseStatisticsText(ctx context.Context) (string, error) {
+	stats, err := s.repo.GetStudentsCountByCourse(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if len(stats) == 0 {
+		return "🤷‍♂️ Пока нет ни одного ученика, прикрепленного к курсам.", nil
+	}
+
+	text := "📚 <b>Статистика учеников по курсам:</b>\n\n"
+	total := 0
+
+	for course, count := range stats {
+		text += fmt.Sprintf("▪️ <b>%s</b>: %d чел.\n", course, count)
+		total += count
+	}
+
+	text += fmt.Sprintf("\n📊 <b>Всего учеников на курсах:</b> %d", total)
+
+	return text, nil
+}
+
+func (s *Service) GetCuratorStatisticsText(ctx context.Context) (string, error) {
+	stats, err := s.repo.GetStudentsCountByCurator(ctx)
+	if err != nil {
+		return "", err
+	}
+
+	if len(stats) == 0 {
+		return "🤷‍♂️ Пока нет ни одного ученика, прикрепленного к кураторам.", nil
+	}
+
+	text := "👨‍🏫 <b>Распределение учеников по кураторам:</b>\n\n"
+	total := 0
+
+	for curatorName, count := range stats {
+		text += fmt.Sprintf("▪️ <b>%s</b>: %d чел.\n", curatorName, count)
+		total += count
+	}
+
+	text += fmt.Sprintf("\n📊 <b>Всего распределено:</b> %d", total)
+
+	return text, nil
+}

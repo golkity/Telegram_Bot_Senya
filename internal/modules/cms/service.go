@@ -83,3 +83,7 @@ func (s *Service) UpdateText(ctx context.Context, key string, value string) erro
 func (s *Service) GetAllContent(ctx context.Context) ([]Content, error) {
 	return s.repo.GetAll(ctx)
 }
+
+func (s *Service) UpdateSetting(ctx context.Context, key string, content string) error {
+	return s.repo.UpdateSetting(ctx, key, content)
+}
