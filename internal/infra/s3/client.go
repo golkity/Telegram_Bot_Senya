@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"io"
+	"net/url"
 	"time"
 
 	"github.com/aws/aws-sdk-go-v2/aws"
@@ -101,4 +102,24 @@ func (c *Client) DownloadFile(ctx context.Context, objectName string) (io.ReadCl
 		return nil, fmt.Errorf("failed to download file from S3: %w", err)
 	}
 	return out.Body, nil
+}
+
+func (c *Client) MoveFile(ctx context.Context, oldKey, newKey string) error {
+	source := fmt.Sprintf("%s/%s", c.bucket, oldKey)
+	sourceEncoded := url.PathEscape(source)
+
+	_, err := c.s3Client.CopyObject(ctx, &s3.CopyObjectInput{
+		Bucket:     aws.String(c.bucket),
+		CopySource: aws.String(sourceEncoded),
+		Key:        aws.String(newKey),
+	})
+	if err != nil {
+		return fmt.Errorf("copy failed: %w", err)
+	}
+
+	_, err = c.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
+		Bucket: aws.String(c.bucket),
+		Key:    aws.String(oldKey),
+	})
+	return err
 }
