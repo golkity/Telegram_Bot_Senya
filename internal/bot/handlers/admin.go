@@ -4,7 +4,6 @@ import (
 	"context"
 	"fmt"
 	"strconv"
-	"time"
 
 	"telegram_bot/internal/bot/keyboards"
 	"telegram_bot/internal/modules/user"
@@ -225,21 +224,14 @@ func (h *Handler) HandleTransferConfirm(ctx context.Context, msg *tgbotapi.Messa
 }
 
 func (h *Handler) HandleAdminDailyReport(ctx context.Context, msg *tgbotapi.Message) {
-	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
+	text, err := h.userSvc.GetDailyAdminStatsText(ctx)
+	if err != nil {
+		h.log.Error("failed to get daily admin stats", "error", err)
+		h.SendMessage(msg.Chat.ID, "❌ Ошибка сбора ежедневной статистики", nil)
 		return
 	}
-	h.SendMessage(msg.Chat.ID, "📊 Генерирую ежедневный отчет...", nil)
-	go func() {
-		stats, err := h.userSvc.GetDailyStats(ctx, 0)
-		if err != nil {
-			h.SendMessage(msg.Chat.ID, "Ошибка сбора статистики", nil)
-			return
-		}
 
-		text := fmt.Sprintf("📊 Отчет за %s\nФайлов: %d\nДЗ: %s",
-			time.Now().Format("02.01"), stats.TotalFilesToday, stats.HomeworkStatus)
-		h.SendMessage(msg.Chat.ID, text, nil)
-	}()
+	h.SendMessage(msg.Chat.ID, text, nil)
 }
 
 func (h *Handler) HandleAdminWeeklyReport(ctx context.Context, msg *tgbotapi.Message) {
