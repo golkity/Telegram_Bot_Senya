@@ -243,3 +243,23 @@ func (s *Service) GetCuratorStatisticsText(ctx context.Context) (string, error) 
 func (s *Service) GetStats(ctx context.Context, courseID string) ([]report.UserStat, error) {
 	return s.repo.GetUsersStatsReport(ctx, courseID)
 }
+
+func (s *Service) GetSubmissionsReport(ctx context.Context) ([]report.SubmissionStat, error) {
+	return s.repo.GetSubmissionsReport(ctx)
+}
+
+func (s *Service) GetStrictSubmissionsReport(ctx context.Context) (*report.StrictReportData, error) {
+	return s.repo.GetStrictSubmissionsReport(ctx)
+}
+
+func (s *Service) GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error) {
+	return s.repo.GetWeeklyReportsReport(ctx)
+}
+
+func (s *Service) GetDailyAdminStatsText(ctx context.Context) (string, error) {
+	return s.repo.GetDailyAdminStatsText(ctx)
+}
+
+func (s *Service) GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error) {
+	return s.repo.GetStudentSheetsReport(ctx)
+}
