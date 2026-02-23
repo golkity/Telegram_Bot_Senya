@@ -37,6 +37,13 @@ type Repository interface {
 	GetStudentsCountByCourse(ctx context.Context) (map[string]int, error)
 	GetStudentsCountByCurator(ctx context.Context) (map[string]int, error)
 	GetUsersStatsReport(ctx context.Context, courseID string) ([]report.UserStat, error)
+
+	GetSubmissionsReport(ctx context.Context) ([]report.SubmissionStat, error)
+	GetStrictSubmissionsReport(ctx context.Context) (*report.StrictReportData, error)
+	GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error)
+	GetDailyAdminStatsText(ctx context.Context) (string, error)
+
+	GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error)
 }
 
 type repo struct {
@@ -469,4 +476,269 @@ func (r *repo) GetUsersStatsReport(ctx context.Context, courseID string) ([]repo
 	}
 
 	return stats, nil
+}
+
+func (r *repo) GetSubmissionsReport(ctx context.Context) ([]report.SubmissionStat, error) {
+	q := `
+		SELECT 
+			TO_CHAR(s.submission_date, 'YYYY-MM-DD HH24:MI') as date,
+			COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '') as student_name,
+			COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, 'Без куратора') as curator_name,
+			s.submission_type,
+			COALESCE(s.status, 'pending')
+		FROM submissions s
+		JOIN users u ON s.user_id = u.user_id
+		LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+		LEFT JOIN users c ON ur.curator_id = c.user_id
+		ORDER BY s.submission_date DESC
+	`
+
+	rows, err := r.db.Pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("db get submissions error: %w", err)
+	}
+	defer rows.Close()
+
+	var stats []report.SubmissionStat
+	for rows.Next() {
+		var stat report.SubmissionStat
+		if err := rows.Scan(
+			&stat.Date, &stat.StudentName, &stat.CuratorName,
+			&stat.Type, &stat.Status,
+		); err == nil {
+			if stat.Type == "homework" {
+				stat.Type = "ДЗ"
+			} else if stat.Type == "notes" {
+				stat.Type = "Конспект"
+			}
+			stats = append(stats, stat)
+		}
+	}
+	return stats, nil
+}
+
+func (r *repo) GetStrictSubmissionsReport(ctx context.Context) (*report.StrictReportData, error) {
+	var totalUsers, courseStudents, courseDevs int
+	_ = r.db.Pool.QueryRow(ctx, `
+		SELECT 
+			COUNT(*),
+			COUNT(*) FILTER (WHERE role = 'student'),
+			COUNT(*) FILTER (WHERE role = 'developer')
+		FROM user_roles
+	`).Scan(&totalUsers, &courseStudents, &courseDevs)
+
+	q := `
+		SELECT 
+			COALESCE(u.username, u.first_name, 'Без имени') AS username,
+			COALESCE(ur.role, 'student') AS role,
+			s.id AS sub_id,
+			TO_CHAR(s.submission_date, 'YYYY-MM-DD HH24:MI:SS') AS sub_date,
+			s.submission_type,
+			COALESCE(s.status, 'pending') AS status,
+			COALESCE(sm.subtask_name, s.task_number, 'Не указано') AS task_name,
+			COALESCE(cardinality(s.file_paths), 0) AS files_count,
+			COALESCE(s.comment, '—') AS comment
+		FROM submissions s
+		JOIN users u ON s.user_id = u.user_id
+		LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+		LEFT JOIN subtask_mappings sm ON s.task_number = sm.subtask_code
+		ORDER BY username, s.submission_date DESC
+	`
+
+	rows, err := r.db.Pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("db get strict submissions error: %w", err)
+	}
+	defer rows.Close()
+
+	data := &report.StrictReportData{
+		ReportTitle:    "ИСТОРИЯ СДАЧ (ГЛОБАЛЬНЫЙ ОТЧЕТ)",
+		GenerationDate: time.Now().Format("02.01.2006 15:04"),
+		CourseName:     "Все курсы",
+		CuratorName:    "Все кураторы",
+		Period:         "За всё время",
+		WeekType:       "—",
+		CourseFilter:   "НЕТ",
+		TotalUsers:     totalUsers,
+		CourseStudents: courseStudents,
+		CourseDevs:     courseDevs,
+	}
+
+	userMap := make(map[string]*report.UserSubmissionsData)
+	var usernames []string
+
+	activeStudentsMap := make(map[string]bool)
+	activeDevsMap := make(map[string]bool)
+
+	for rows.Next() {
+		var username, role, subDate, subType, status, taskName, comment string
+		var subID int64
+		var filesCount int
+
+		if err := rows.Scan(&username, &role, &subID, &subDate, &subType, &status, &taskName, &filesCount, &comment); err != nil {
+			continue
+		}
+
+		data.TotalSubmissions++
+		if subType == "homework" {
+			data.HWSubmissions++
+			subType = "📚 ДЗ"
+		} else if subType == "notes" {
+			data.NotesSubmissions++
+			subType = "📝 Конспект"
+		}
+
+		if role == "student" {
+			activeStudentsMap[username] = true
+		} else if role == "developer" {
+			activeDevsMap[username] = true
+		}
+
+		if status == "pending" {
+			status = "⏳ На проверке"
+		} else if status == "approved" {
+			status = "✅ Проверено"
+		}
+
+		userData, exists := userMap[username]
+		if !exists {
+			userData = &report.UserSubmissionsData{Username: username}
+			userMap[username] = userData
+			usernames = append(usernames, username)
+		}
+
+		detail := report.SubmissionDetail{
+			DateTime:     subDate,
+			Type:         subType,
+			TaskName:     taskName,
+			FilesCount:   filesCount,
+			Comment:      comment,
+			Status:       status,
+			SubmissionID: subID,
+		}
+
+		userData.Submissions = append(userData.Submissions, detail)
+		userData.TotalCount++
+	}
+
+	data.ActiveStudents = len(activeStudentsMap)
+	data.ActiveDevs = len(activeDevsMap)
+	data.DaysInPeriod = "За всё время"
+	data.ReportTypeStat = "Глобальная выгрузка"
+
+	if data.TotalUsers > 0 {
+		data.AvgSubmissions = float64(data.TotalSubmissions) / float64(data.TotalUsers)
+	}
+
+	totalHWNotes := float64(data.HWSubmissions + data.NotesSubmissions)
+	if totalHWNotes > 0 {
+		hwPct := (float64(data.HWSubmissions) / totalHWNotes) * 100
+		notesPct := (float64(data.NotesSubmissions) / totalHWNotes) * 100
+		data.HWNotesRatio = fmt.Sprintf("%.1f%% / %.1f%%", hwPct, notesPct)
+	} else {
+		data.HWNotesRatio = "0.0% / 0.0%"
+	}
+
+	for _, uname := range usernames {
+		uData := userMap[uname]
+		for i := range uData.Submissions {
+			uData.Submissions[i].Number = i + 1
+		}
+		data.Users = append(data.Users, *uData)
+	}
+
+	return data, nil
+}
+
+func (r *repo) GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error) {
+	q := `
+		SELECT 
+			TO_CHAR(wr.created_at, 'YYYY-MM-DD HH24:MI') AS date,
+			COALESCE(u.username, u.first_name, 'Без имени') AS student_name,
+			COALESCE(c.first_name, 'Без куратора') AS curator_name,
+			wr.report_text
+		FROM weekly_reports wr
+		JOIN users u ON wr.user_id = u.user_id
+		LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+		LEFT JOIN users c ON ur.curator_id = c.user_id
+		ORDER BY wr.created_at DESC
+	`
+
+	rows, err := r.db.Pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("db get weekly reports error: %w", err)
+	}
+	defer rows.Close()
+
+	var reports []report.WeeklyReportData
+	for rows.Next() {
+		var rep report.WeeklyReportData
+		if err := rows.Scan(&rep.Date, &rep.StudentName, &rep.CuratorName, &rep.Text); err == nil {
+			reports = append(reports, rep)
+		}
+	}
+	return reports, nil
+}
+
+func (r *repo) GetDailyAdminStatsText(ctx context.Context) (string, error) {
+	var newUsers, totalHW, totalNotes int
+
+	err := r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM users WHERE registration_date >= NOW() - INTERVAL '24 hours'`).Scan(&newUsers)
+	if err != nil {
+		return "", err
+	}
+
+	err = r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM submissions WHERE submission_date >= CURRENT_DATE AND submission_type = 'homework'`).Scan(&totalHW)
+	if err != nil {
+		return "", err
+	}
+
+	err = r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM submissions WHERE submission_date >= CURRENT_DATE AND submission_type = 'notes'`).Scan(&totalNotes)
+	if err != nil {
+		return "", err
+	}
+
+	text := fmt.Sprintf(
+		"📈 <b>Общий отчет за сегодня:</b>\n\n"+
+			"👤 Новых регистраций (за 24ч): <b>%d</b>\n"+
+			"📚 Сдано ДЗ (сегодня): <b>%d</b>\n"+
+			"📝 Сдано конспектов (сегодня): <b>%d</b>",
+		newUsers, totalHW, totalNotes,
+	)
+	return text, nil
+}
+
+func (r *repo) GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error) {
+	q := `
+		SELECT 
+			COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, 'Без куратора') AS curator_name,
+			COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, 'Без имени') AS student_name,
+			COALESCE(u.username, '—') AS username,
+			COALESCE(cr.course_name, 'Без курса') AS course_name,
+			COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
+			COUNT(s.id) FILTER (WHERE s.submission_type = 'notes') AS notes_count,
+			TO_CHAR(u.registration_date, 'YYYY-MM-DD') AS reg_date
+		FROM users u
+		JOIN user_roles ur ON u.user_id = ur.user_id AND ur.role = 'student'
+		LEFT JOIN users c ON ur.curator_id = c.user_id
+		LEFT JOIN courses cr ON ur.course_id = cr.course_id
+		LEFT JOIN submissions s ON u.user_id = s.user_id
+		GROUP BY curator_name, student_name, u.username, cr.course_name, u.registration_date
+		ORDER BY curator_name, student_name
+	`
+
+	rows, err := r.db.Pool.Query(ctx, q)
+	if err != nil {
+		return nil, fmt.Errorf("db get student sheets error: %w", err)
+	}
+	defer rows.Close()
+
+	var records []report.StudentSheetRecord
+	for rows.Next() {
+		var rec report.StudentSheetRecord
+		if err := rows.Scan(&rec.CuratorName, &rec.StudentName, &rec.Username, &rec.CourseName, &rec.HWCount, &rec.NotesCount, &rec.RegisteredAt); err == nil {
+			records = append(records, rec)
+		}
+	}
+	return records, nil
 }

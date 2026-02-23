@@ -145,6 +145,8 @@ func (r *Router) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 
 	case "📝 Отправить напоминание":
 		r.handler.HandleCuratorReminder(ctx, msg)
+	case "📊 Общий еженедельный отчет":
+		r.handler.HandleAdminWeeklyReport(ctx, msg)
 	case "📊 Мой ежедневный отчет":
 		r.handler.HandleCuratorDailyReport(ctx, msg)
 	case "📈 Мой еженедельный отчет":
