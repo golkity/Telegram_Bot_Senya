@@ -7,6 +7,8 @@ services:
     depends_on:
       - postgres
       - redis
+    ports:
+      - "2112:2112"
 
   postgres:
     image: postgres:${POSTGRES_VERSION}
@@ -39,6 +41,31 @@ services:
       timeout: 10s
       retries: 5
 
+  prometheus:
+    image: prom/prometheus:latest
+    restart: always
+    volumes:
+      - ./prometheus.yml:/etc/prometheus/prometheus.yml
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    depends_on:
+      - bot
+
+  grafana:
+    image: grafana/grafana:latest
+    restart: always
+    volumes:
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    depends_on:
+      - prometheus
+    environment:
+      - GF_SECURITY_ADMIN_PASSWORD=admin
+
 volumes:
   pg_data:
   redis_data:
+  prometheus_data:
+  grafana_data:
