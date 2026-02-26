@@ -3,6 +3,7 @@ package app
 import (
 	"context"
 	"log/slog"
+	"net/http"
 	"os"
 	"os/signal"
 	"syscall"
@@ -23,6 +24,8 @@ import (
 	"telegram_bot/internal/scheduler"
 	"telegram_bot/internal/storage"
 	"telegram_bot/pkg/postgres"
+
+	"github.com/prometheus/client_golang/prometheus/promhttp"
 )
 
 type Config struct {
@@ -110,6 +113,14 @@ func Run(cfg *Config) {
 		return userService.SendGlobalReminders(c)
 	})
 	cron.Start(ctx)
+
+	go func() {
+		logger.Info("Starting Prometheus metrics server on :2112")
+		http.Handle("/metrics", promhttp.Handler())
+		if err := http.ListenAndServe(":2112", nil); err != nil {
+			logger.Error("Prometheus metrics server failed", "err", err)
+		}
+	}()
 
 	go router.Start()
 
