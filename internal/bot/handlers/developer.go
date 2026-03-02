@@ -10,10 +10,17 @@ import (
 )
 
 func (h *Handler) HandleDeveloperMenu(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	h.SendMessage(msg.Chat.ID, "👨‍💻 Панель разработчика", keyboards.DeveloperMenu)
 }
 
 func (h *Handler) HandleSelectCurator(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
+
 	curators, err := h.userSvc.GetAllCurators(ctx)
 	if err != nil {
 		h.log.Error("failed to fetch curators", "error", err)

@@ -12,6 +12,10 @@ import (
 )
 
 func (h *Handler) HandleStudentJoinCourse(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
+
 	text := msg.Text
 	courseName := strings.TrimPrefix(text, "📚 ")
 
@@ -36,13 +40,25 @@ func (h *Handler) HandleStudentJoinCourse(ctx context.Context, msg *tgbotapi.Mes
 }
 
 func (h *Handler) HandleGetArchive(ctx context.Context, msg *tgbotapi.Message) {
-	h.SendMessage(msg.Chat.ID, "📦 Запрос принят. Начинаю сборку архива всех ваших файлов...\nЭто может занять несколько минут.", nil)
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
+
+	waitMsgConfig := tgbotapi.NewMessage(msg.Chat.ID, "📦 Запрос принят. Начинаю сборку архива всех ваших файлов...\nЭто может занять несколько минут.")
+	waitMsg, _ := h.bot.Send(waitMsgConfig)
 
 	go func() {
 		bgCtx, cancel := context.WithTimeout(context.Background(), 10*time.Minute)
 		defer cancel()
 
 		archiveURL, err := h.submissionSvc.GenerateUserArchive(bgCtx, msg.From.ID)
+
+		if waitMsg.MessageID != 0 {
+			go func() {
+				h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+			}()
+		}
+
 		if err != nil {
 			h.log.Error("failed to generate archive", "user_id", msg.From.ID, "error", err)
 			h.SendMessage(msg.Chat.ID, "❌ Ошибка при создании архива. Попробуйте позже или обратитесь к администратору.", nil)
@@ -58,6 +74,10 @@ func (h *Handler) HandleGetArchive(ctx context.Context, msg *tgbotapi.Message) {
 }
 
 func (h *Handler) HandleDailyStatistics(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
+
 	stats, err := h.userSvc.GetDailyStats(ctx, msg.From.ID)
 	if err != nil {
 		h.log.Error("failed to get stats", "error", err)
@@ -79,6 +99,10 @@ func (h *Handler) HandleDailyStatistics(ctx context.Context, msg *tgbotapi.Messa
 }
 
 func (h *Handler) HandleWeeklyReportSubmission(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
+
 	if !h.reportSvc.IsReportDay(time.Now().Weekday()) {
 		h.SendMessage(msg.Chat.ID, "❌ Еженедельные отчеты принимаются только в Воскресенье и Понедельник.", keyboards.StudentMenu)
 		return
@@ -96,6 +120,10 @@ func (h *Handler) HandleWeeklyReportSubmission(ctx context.Context, msg *tgbotap
 }
 
 func (h *Handler) HandleStudentJoinCurator(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
+
 	text := msg.Text
 	curatorName := strings.TrimPrefix(text, "👤 ")
 
