@@ -10,6 +10,12 @@ import (
 )
 
 func (h *Handler) HandleStart(ctx context.Context, msg *tgbotapi.Message) {
+	if msg.MessageID != 0 {
+		go func() {
+			h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+		}()
+	}
+
 	u := user.User{
 		ID:        msg.From.ID,
 		Username:  msg.From.UserName,
@@ -92,6 +98,12 @@ func (h *Handler) handleDeveloperWelcome(_ context.Context, chatID int64, u *use
 }
 
 func (h *Handler) HandleCourseSelection(ctx context.Context, msg *tgbotapi.Message) {
+	if msg.MessageID != 0 {
+		go func() {
+			h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+		}()
+	}
+
 	courses, err := h.userSvc.GetAllCourses(ctx)
 	if err != nil {
 		h.SendMessage(msg.Chat.ID, "Ошибка загрузки курсов.", nil)
@@ -110,6 +122,12 @@ func (h *Handler) HandleCourseSelection(ctx context.Context, msg *tgbotapi.Messa
 }
 
 func (h *Handler) HandleCuratorSelectionForStudent(ctx context.Context, msg *tgbotapi.Message) {
+	if msg.MessageID != 0 {
+		go func() {
+			h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+		}()
+	}
+
 	u, err := h.userSvc.GetUserInfo(ctx, msg.From.ID)
 	if err != nil || u == nil || u.CourseID == nil {
 		h.SendMessage(msg.Chat.ID, "Сначала выберите курс.", nil)

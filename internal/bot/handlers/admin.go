@@ -21,6 +21,9 @@ func (h *Handler) checkAdminPermission(ctx context.Context, chatID int64, userID
 }
 
 func (h *Handler) HandleAdminPanel(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -28,6 +31,9 @@ func (h *Handler) HandleAdminPanel(ctx context.Context, msg *tgbotapi.Message) {
 }
 
 func (h *Handler) HandleUserManagementMenu(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -35,6 +41,9 @@ func (h *Handler) HandleUserManagementMenu(ctx context.Context, msg *tgbotapi.Me
 }
 
 func (h *Handler) HandleRoleManagement(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -42,6 +51,9 @@ func (h *Handler) HandleRoleManagement(ctx context.Context, msg *tgbotapi.Messag
 }
 
 func (h *Handler) HandleCustomization(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -49,6 +61,9 @@ func (h *Handler) HandleCustomization(ctx context.Context, msg *tgbotapi.Message
 }
 
 func (h *Handler) HandleUserStatisticsRequest(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -57,6 +72,9 @@ func (h *Handler) HandleUserStatisticsRequest(ctx context.Context, msg *tgbotapi
 }
 
 func (h *Handler) HandleStartDeleteUser(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -65,6 +83,9 @@ func (h *Handler) HandleStartDeleteUser(ctx context.Context, msg *tgbotapi.Messa
 }
 
 func (h *Handler) HandleDeleteUserInput(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -92,6 +113,9 @@ func (h *Handler) HandleDeleteUserInput(ctx context.Context, msg *tgbotapi.Messa
 }
 
 func (h *Handler) HandleDeleteConfirm(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -137,6 +161,9 @@ func (h *Handler) HandleDeleteConfirm(ctx context.Context, msg *tgbotapi.Message
 }
 
 func (h *Handler) HandleBulkTransfer(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -144,6 +171,9 @@ func (h *Handler) HandleBulkTransfer(ctx context.Context, msg *tgbotapi.Message)
 }
 
 func (h *Handler) HandleStartTransferByCurator(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -152,6 +182,9 @@ func (h *Handler) HandleStartTransferByCurator(ctx context.Context, msg *tgbotap
 }
 
 func (h *Handler) HandleTransferSourceInput(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -163,6 +196,9 @@ func (h *Handler) HandleTransferSourceInput(ctx context.Context, msg *tgbotapi.M
 }
 
 func (h *Handler) HandleTransferTargetInput(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -178,6 +214,9 @@ func (h *Handler) HandleTransferTargetInput(ctx context.Context, msg *tgbotapi.M
 }
 
 func (h *Handler) HandleTransferConfirm(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -224,6 +263,9 @@ func (h *Handler) HandleTransferConfirm(ctx context.Context, msg *tgbotapi.Messa
 }
 
 func (h *Handler) HandleAdminDailyReport(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	text, err := h.userSvc.GetDailyAdminStatsText(ctx)
 	if err != nil {
 		h.log.Error("failed to get daily admin stats", "error", err)
@@ -235,6 +277,9 @@ func (h *Handler) HandleAdminDailyReport(ctx context.Context, msg *tgbotapi.Mess
 }
 
 func (h *Handler) HandleAdminWeeklyReport(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -246,6 +291,9 @@ func (h *Handler) HandleAdminWeeklyReport(ctx context.Context, msg *tgbotapi.Mes
 }
 
 func (h *Handler) HandleAdminDetailedExcel(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -257,6 +305,9 @@ func (h *Handler) HandleAdminDetailedExcel(ctx context.Context, msg *tgbotapi.Me
 }
 
 func (h *Handler) HandleAdminWordReport(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -268,6 +319,9 @@ func (h *Handler) HandleAdminWordReport(ctx context.Context, msg *tgbotapi.Messa
 }
 
 func (h *Handler) HandleAdminSubmissionExcel(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -279,6 +333,9 @@ func (h *Handler) HandleAdminSubmissionExcel(ctx context.Context, msg *tgbotapi.
 }
 
 func (h *Handler) HandleAdminStudentSheets(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -290,6 +347,9 @@ func (h *Handler) HandleAdminStudentSheets(ctx context.Context, msg *tgbotapi.Me
 }
 
 func (h *Handler) HandleSendGlobalReminders(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -300,6 +360,9 @@ func (h *Handler) HandleSendGlobalReminders(ctx context.Context, msg *tgbotapi.M
 }
 
 func (h *Handler) HandleAdminToggleNotifications(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -312,6 +375,9 @@ func (h *Handler) HandleAdminToggleNotifications(ctx context.Context, msg *tgbot
 }
 
 func (h *Handler) HandleAdminCuratorStats(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -320,6 +386,9 @@ func (h *Handler) HandleAdminCuratorStats(ctx context.Context, msg *tgbotapi.Mes
 }
 
 func (h *Handler) HandleAdminStudentsByCourse(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -335,6 +404,9 @@ func (h *Handler) HandleAdminStudentsByCourse(ctx context.Context, msg *tgbotapi
 }
 
 func (h *Handler) HandleAdminCuratorStudents(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -350,6 +422,9 @@ func (h *Handler) HandleAdminCuratorStudents(ctx context.Context, msg *tgbotapi.
 }
 
 func (h *Handler) HandleCMSChangeBotName(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -358,6 +433,9 @@ func (h *Handler) HandleCMSChangeBotName(ctx context.Context, msg *tgbotapi.Mess
 }
 
 func (h *Handler) HandleCMSChangeGreeting(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -366,6 +444,9 @@ func (h *Handler) HandleCMSChangeGreeting(ctx context.Context, msg *tgbotapi.Mes
 }
 
 func (h *Handler) HandleCMSChangeButtons(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -374,6 +455,9 @@ func (h *Handler) HandleCMSChangeButtons(ctx context.Context, msg *tgbotapi.Mess
 }
 
 func (h *Handler) HandleCMSChangeAllMessages(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -382,6 +466,9 @@ func (h *Handler) HandleCMSChangeAllMessages(ctx context.Context, msg *tgbotapi.
 }
 
 func (h *Handler) HandleCMSChangeReportTime(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -390,6 +477,9 @@ func (h *Handler) HandleCMSChangeReportTime(ctx context.Context, msg *tgbotapi.M
 }
 
 func (h *Handler) HandleCMSChangeReminderTime(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -398,6 +488,9 @@ func (h *Handler) HandleCMSChangeReminderTime(ctx context.Context, msg *tgbotapi
 }
 
 func (h *Handler) HandleCMSChangeCheckTime(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -406,6 +499,9 @@ func (h *Handler) HandleCMSChangeCheckTime(ctx context.Context, msg *tgbotapi.Me
 }
 
 func (h *Handler) HandleCMSChangeCuratorReportTime(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -414,6 +510,9 @@ func (h *Handler) HandleCMSChangeCuratorReportTime(ctx context.Context, msg *tgb
 }
 
 func (h *Handler) HandleCMSChangeWeeklyReportDays(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -422,6 +521,9 @@ func (h *Handler) HandleCMSChangeWeeklyReportDays(ctx context.Context, msg *tgbo
 }
 
 func (h *Handler) HandleCMSViewConfig(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
@@ -430,6 +532,9 @@ func (h *Handler) HandleCMSViewConfig(ctx context.Context, msg *tgbotapi.Message
 }
 
 func (h *Handler) HandleCMSResetConfig(ctx context.Context, msg *tgbotapi.Message) {
+	go func() {
+		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+	}()
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
