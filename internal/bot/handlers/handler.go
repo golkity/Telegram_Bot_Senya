@@ -75,14 +75,33 @@ func (h *Handler) EditMessageText(chatID int64, messageID int, text string, kb i
 }
 
 func (h *Handler) SendFile(chatID int64, fileData interface{}, fileName string, caption string) {
+	if fileData == nil {
+		if caption != "" {
+			h.SendMessage(chatID, caption, nil)
+		}
+		return
+	}
+
 	var fileRequest tgbotapi.Chattable
 
 	switch data := fileData.(type) {
 	case string:
+		if data == "" {
+			if caption != "" {
+				h.SendMessage(chatID, caption, nil)
+			}
+			return
+		}
 		doc := tgbotapi.NewDocument(chatID, tgbotapi.FileID(data))
 		doc.Caption = caption
 		fileRequest = doc
 	case []byte:
+		if len(data) == 0 {
+			if caption != "" {
+				h.SendMessage(chatID, caption, nil)
+			}
+			return
+		}
 		fileBytes := tgbotapi.FileBytes{
 			Name:  fileName,
 			Bytes: data,
@@ -90,6 +109,11 @@ func (h *Handler) SendFile(chatID int64, fileData interface{}, fileName string, 
 		doc := tgbotapi.NewDocument(chatID, fileBytes)
 		doc.Caption = caption
 		fileRequest = doc
+	default:
+		if caption != "" {
+			h.SendMessage(chatID, caption, nil)
+		}
+		return
 	}
 
 	if fileRequest != nil {

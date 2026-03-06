@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log/slog"
+	"strings"
 	"telegram_bot/internal/modules/report"
 	"time"
 )
@@ -150,12 +151,37 @@ func (s *Service) GetCuratorsStats(ctx context.Context) (string, error) {
 		return "", err
 	}
 
-	result := "📊 Статистика кураторов:\n"
+	if len(curators) == 0 {
+		return "📭 В системе пока нет кураторов.", nil
+	}
+
+	var sb strings.Builder
+	sb.WriteString("👨‍🏫 <b>Общая статистика кураторов:</b>\n")
+	sb.WriteString("━━━━━━━━━━━━━━━━━━\n\n")
+
+	totalStudents := 0
+
 	for _, c := range curators {
 		students, _ := s.repo.GetByCuratorID(ctx, c.ID)
-		result += fmt.Sprintf("- %s %s: %d студентов\n", c.FirstName, c.LastName, len(students))
+		count := len(students)
+		totalStudents += count
+
+		status := "🟢 В норме"
+		if count >= 30 {
+			status = "🔴 Перегружен"
+		} else if count >= 15 {
+			status = "🟡 Загружен"
+		}
+
+		sb.WriteString(fmt.Sprintf("🔹 <b>%s %s</b>\n", c.FirstName, c.LastName))
+		sb.WriteString(fmt.Sprintf("  ├ 👥 Студентов: <b>%d</b>\n", count))
+		sb.WriteString(fmt.Sprintf("  └ 🚦 Статус: %s\n\n", status))
 	}
-	return result, nil
+
+	sb.WriteString("━━━━━━━━━━━━━━━━━━\n")
+	sb.WriteString(fmt.Sprintf("📊 <b>Итого студентов у кураторов:</b> %d", totalStudents))
+
+	return sb.String(), nil
 }
 
 func (s *Service) DeleteUser(ctx context.Context, userID int64) error {
@@ -204,17 +230,21 @@ func (s *Service) GetCourseStatisticsText(ctx context.Context) (string, error) {
 		return "🤷‍♂️ Пока нет ни одного ученика, прикрепленного к курсам.", nil
 	}
 
-	text := "📚 <b>Статистика учеников по курсам:</b>\n\n"
-	total := 0
+	var sb strings.Builder
+	sb.WriteString("📚 <b>Аналитика распределения по курсам</b>\n")
+	sb.WriteString("━━━━━━━━━━━━━━━━━━\n\n")
 
+	total := 0
 	for course, count := range stats {
-		text += fmt.Sprintf("▪️ <b>%s</b>: %d чел.\n", course, count)
+		sb.WriteString(fmt.Sprintf("📌 <b>Курс:</b> «%s»\n", course))
+		sb.WriteString(fmt.Sprintf("  └ 👥 Учеников: <b>%d</b>\n\n", count))
 		total += count
 	}
 
-	text += fmt.Sprintf("\n📊 <b>Всего учеников на курсах:</b> %d", total)
+	sb.WriteString("━━━━━━━━━━━━━━━━━━\n")
+	sb.WriteString(fmt.Sprintf("📊 <b>Всего активных учеников:</b> %d", total))
 
-	return text, nil
+	return sb.String(), nil
 }
 
 func (s *Service) GetCuratorStatisticsText(ctx context.Context) (string, error) {
@@ -227,17 +257,21 @@ func (s *Service) GetCuratorStatisticsText(ctx context.Context) (string, error) 
 		return "🤷‍♂️ Пока нет ни одного ученика, прикрепленного к кураторам.", nil
 	}
 
-	text := "👨‍🏫 <b>Распределение учеников по кураторам:</b>\n\n"
-	total := 0
+	var sb strings.Builder
+	sb.WriteString("👨‍🏫 <b>Распределение учеников (Сводка)</b>\n")
+	sb.WriteString("━━━━━━━━━━━━━━━━━━\n\n")
 
+	total := 0
 	for curatorName, count := range stats {
-		text += fmt.Sprintf("▪️ <b>%s</b>: %d чел.\n", curatorName, count)
+		sb.WriteString(fmt.Sprintf("👤 <b>Куратор:</b> %s\n", curatorName))
+		sb.WriteString(fmt.Sprintf("  └ 🎓 Учеников: <b>%d</b>\n\n", count))
 		total += count
 	}
 
-	text += fmt.Sprintf("\n📊 <b>Всего распределено:</b> %d", total)
+	sb.WriteString("━━━━━━━━━━━━━━━━━━\n")
+	sb.WriteString(fmt.Sprintf("📊 <b>Всего распределено:</b> %d чел.", total))
 
-	return text, nil
+	return sb.String(), nil
 }
 
 func (s *Service) GetStats(ctx context.Context, courseID string) ([]report.UserStat, error) {
@@ -262,4 +296,8 @@ func (s *Service) GetDailyAdminStatsText(ctx context.Context) (string, error) {
 
 func (s *Service) GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error) {
 	return s.repo.GetStudentSheetsReport(ctx)
+}
+
+func (s *Service) GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]report.UserStat, error) {
+	return s.repo.GetCuratorStatsReport(ctx, curatorID)
 }
