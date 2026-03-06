@@ -40,7 +40,7 @@ func (h *Handler) HandleStart(ctx context.Context, msg *tgbotapi.Message) {
 
 	if err := h.userSvc.RegisterOrUpdate(ctx, u); err != nil {
 		h.log.Error("registration failed", "error", err)
-		h.SendMessage(msg.Chat.ID, "⚠️ Произошла ошибка системы. Пожалуйста, попробуй позже.", nil)
+		h.SendCleanMessage(msg.Chat.ID, "⚠️ Произошла ошибка системы. Пожалуйста, попробуй позже.", nil)
 		return
 	}
 
@@ -57,11 +57,11 @@ func (h *Handler) routeUserByProfile(ctx context.Context, chatID int64, u *user.
 	switch u.Role {
 	case user.RoleAdmin:
 		msg := fmt.Sprintf("👋 <b>Привет, %s!</b>\n\n⚙️ Панель администратора готова к работе. Выбирай нужное действие в меню 👇", u.FirstName)
-		h.SendMessage(chatID, msg, keyboards.AdminMenu)
+		h.SendCleanMessage(chatID, msg, keyboards.AdminMenu)
 
 	case user.RoleCurator:
 		msg := fmt.Sprintf("👨‍🏫 <b>Привет, %s!</b>\n\nТвои ученики и отчеты ждут. Выбирай действие в меню 👇", u.FirstName)
-		h.SendMessage(chatID, msg, keyboards.CuratorMenu)
+		h.SendCleanMessage(chatID, msg, keyboards.CuratorMenu)
 
 	case user.RoleDeveloper:
 		h.handleDeveloperWelcome(ctx, chatID, u)
@@ -70,13 +70,12 @@ func (h *Handler) routeUserByProfile(ctx context.Context, chatID int64, u *user.
 		h.handleStudentWelcome(ctx, chatID, u)
 
 	default:
-		h.SendMessage(chatID, "❌ Твоя роль не определена. Пожалуйста, обратись к администратору.", nil)
+		h.SendCleanMessage(chatID, "❌ Твоя роль не определена. Пожалуйста, обратись к администратору.", nil)
 	}
 }
 
 func (h *Handler) handleStudentWelcome(ctx context.Context, chatID int64, u *user.User) {
 	if u.CourseID == nil || *u.CourseID == "" {
-		h.SendMessage(chatID, fmt.Sprintf("👋 <b>Привет, %s!</b> Добро пожаловать!\n\nДавай настроим твой профиль. Для начала <b>выбери свой курс</b> 👇", u.FirstName), nil)
 		h.HandleCourseSelection(ctx, &tgbotapi.Message{
 			Chat: &tgbotapi.Chat{ID: chatID},
 			From: &tgbotapi.User{ID: u.ID},
@@ -85,7 +84,6 @@ func (h *Handler) handleStudentWelcome(ctx context.Context, chatID int64, u *use
 	}
 
 	if u.CuratorID == nil || *u.CuratorID == 0 {
-		h.SendMessage(chatID, "✅ <b>Отлично! Курс сохранен.</b>\n\nТеперь последний шаг: <b>выбери своего куратора</b> 👇", nil)
 		h.HandleCuratorSelectionForStudent(ctx, &tgbotapi.Message{
 			Chat: &tgbotapi.Chat{ID: chatID},
 			From: &tgbotapi.User{ID: u.ID},
@@ -94,18 +92,18 @@ func (h *Handler) handleStudentWelcome(ctx context.Context, chatID int64, u *use
 	}
 
 	msg := fmt.Sprintf("👋 <b>С возвращением, %s!</b>\n\nЧто будем делать сегодня? Выбирай действие 👇", u.FirstName)
-	h.SendMessage(chatID, msg, keyboards.StudentMenu)
+	h.SendCleanMessage(chatID, msg, keyboards.StudentMenu)
 }
 
 func (h *Handler) handleDeveloperWelcome(_ context.Context, chatID int64, u *user.User) {
 	if u.CuratorID == nil || *u.CuratorID == 0 {
 		msg := fmt.Sprintf("👨‍💻 <b>Привет, %s (Developer)!</b>\n\n⚠️ Чтобы тестировать сдачу ДЗ, тебе нужно <b>прикрепиться к куратору</b> через меню 👇", u.FirstName)
-		h.SendMessage(chatID, msg, keyboards.DeveloperMenu)
+		h.SendCleanMessage(chatID, msg, keyboards.DeveloperMenu)
 		return
 	}
 
 	msg := fmt.Sprintf("👨‍💻 <b>Привет, %s!</b>\n\nРежим разработчика активен. Доступные инструменты в меню 👇", u.FirstName)
-	h.SendMessage(chatID, msg, keyboards.DeveloperMenu)
+	h.SendCleanMessage(chatID, msg, keyboards.DeveloperMenu)
 }
 
 func (h *Handler) HandleCourseSelection(ctx context.Context, msg *tgbotapi.Message) {
@@ -117,7 +115,7 @@ func (h *Handler) HandleCourseSelection(ctx context.Context, msg *tgbotapi.Messa
 
 	courses, err := h.userSvc.GetAllCourses(ctx)
 	if err != nil {
-		h.SendMessage(msg.Chat.ID, "❌ Ошибка загрузки курсов. Попробуй позже.", nil)
+		h.SendCleanMessage(msg.Chat.ID, "❌ Ошибка загрузки курсов. Попробуй позже.", nil)
 		return
 	}
 
@@ -129,7 +127,9 @@ func (h *Handler) HandleCourseSelection(ctx context.Context, msg *tgbotapi.Messa
 	kb := tgbotapi.NewReplyKeyboard(rows...)
 
 	h.state.SetState(msg.From.ID, StateWaitingForCourseSelection)
-	h.SendMessage(msg.Chat.ID, "📚 <b>Доступные направления:</b>\nВыбери свой курс из меню ниже:", kb)
+
+	text := "👋 <b>Добро пожаловать!</b> Давай настроим твой профиль.\n\n📚 <b>Доступные направления:</b>\nВыбери свой курс из меню ниже 👇"
+	h.SendCleanMessage(msg.Chat.ID, text, kb)
 }
 
 func (h *Handler) HandleCuratorSelectionForStudent(ctx context.Context, msg *tgbotapi.Message) {
@@ -141,7 +141,7 @@ func (h *Handler) HandleCuratorSelectionForStudent(ctx context.Context, msg *tgb
 
 	u, err := h.userSvc.GetUserInfo(ctx, msg.From.ID)
 	if err != nil || u == nil || u.CourseID == nil {
-		h.SendMessage(msg.Chat.ID, "⚠️ Сначала нужно выбрать курс.", nil)
+		h.SendCleanMessage(msg.Chat.ID, "⚠️ Сначала нужно выбрать курс.", nil)
 		h.HandleCourseSelection(ctx, msg)
 		return
 	}
@@ -149,7 +149,7 @@ func (h *Handler) HandleCuratorSelectionForStudent(ctx context.Context, msg *tgb
 	curators, err := h.userSvc.GetCuratorsByCourse(ctx, *u.CourseID)
 	if err != nil {
 		h.log.Error("failed to load curators", "course_id", *u.CourseID, "error", err)
-		h.SendMessage(msg.Chat.ID, "❌ Ошибка загрузки списка кураторов.", nil)
+		h.SendCleanMessage(msg.Chat.ID, "❌ Ошибка загрузки списка кураторов.", nil)
 		return
 	}
 
@@ -160,12 +160,14 @@ func (h *Handler) HandleCuratorSelectionForStudent(ctx context.Context, msg *tgb
 	}
 
 	if len(rows) == 0 {
-		h.SendMessage(msg.Chat.ID, "😔 На этом курсе пока нет доступных кураторов. Напиши администратору.", nil)
+		h.SendCleanMessage(msg.Chat.ID, "😔 На этом курсе пока нет доступных кураторов. Напиши администратору.", nil)
 		return
 	}
 
 	kb := tgbotapi.NewReplyKeyboard(rows...)
 
 	h.state.SetState(msg.From.ID, StateWaitingForCuratorSelection)
-	h.SendMessage(msg.Chat.ID, "👤 <b>Наставники курса:</b>\nВыбери своего куратора из списка ниже:", kb)
+
+	text := "✅ <b>Отлично! Курс сохранен.</b>\n\n👤 <b>Наставники курса:</b>\nТеперь последний шаг: выбери своего куратора из списка ниже 👇"
+	h.SendCleanMessage(msg.Chat.ID, text, kb)
 }
