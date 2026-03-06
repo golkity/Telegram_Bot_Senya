@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
+	"sync"
 
 	"telegram_bot/internal/bot/keyboards"
 	"telegram_bot/internal/infra/word"
@@ -26,6 +27,8 @@ type Handler struct {
 	log   *slog.Logger
 
 	wordGen *word.Generator
+
+	lastBotMessages sync.Map
 }
 
 func NewHandler(
@@ -59,6 +62,32 @@ func (h *Handler) SendMessage(chatID int64, text string, kb interface{}) {
 	if _, err := h.bot.Send(msg); err != nil {
 		h.log.Error("failed to send message", "chat_id", chatID, "error", err)
 	}
+}
+
+func (h *Handler) SendCleanMessage(chatID int64, text string, kb interface{}) {
+	if oldMsgVal, ok := h.lastBotMessages.Load(chatID); ok {
+		oldMsgID := oldMsgVal.(int)
+		go func() {
+			_, err := h.bot.Request(tgbotapi.NewDeleteMessage(chatID, oldMsgID))
+			if err != nil {
+				h.log.Debug("could not delete previous bot message (maybe deleted by user)", "err", err)
+			}
+		}()
+	}
+
+	msg := tgbotapi.NewMessage(chatID, text)
+	msg.ParseMode = "HTML"
+	if kb != nil {
+		msg.ReplyMarkup = kb
+	}
+
+	sentMsg, err := h.bot.Send(msg)
+	if err != nil {
+		h.log.Error("failed to send clean message", "chat_id", chatID, "error", err)
+		return
+	}
+
+	h.lastBotMessages.Store(chatID, sentMsg.MessageID)
 }
 
 func (h *Handler) EditMessageText(chatID int64, messageID int, text string, kb interface{}) {
@@ -161,7 +190,7 @@ func (h *Handler) HandleGenericText(ctx context.Context, msg *tgbotapi.Message) 
 		go func() {
 			h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
 		}()
-		h.SendMessage(msg.Chat.ID, "Поиск по тексту пока не реализован, используйте меню.", nil)
+		h.SendCleanMessage(msg.Chat.ID, "Поиск по тексту пока не реализован, используйте меню.", nil)
 	case StateWaitingForTransferSource:
 		h.HandleTransferSourceInput(ctx, msg)
 	case StateWaitingForTransferTarget:
@@ -202,9 +231,9 @@ func (h *Handler) HandleGenericText(ctx context.Context, msg *tgbotapi.Message) 
 		err := h.cmsSvc.UpdateSetting(ctx, keyToUpdate, newValue)
 		if err != nil {
 			h.log.Error("failed to update cms setting", "key", keyToUpdate, "err", err)
-			h.SendMessage(msg.Chat.ID, "❌ Ошибка при сохранении настройки.", keyboards.CustomizationMenu)
+			h.SendCleanMessage(msg.Chat.ID, "❌ Ошибка при сохранении настройки.", keyboards.CustomizationMenu)
 		} else {
-			h.SendMessage(msg.Chat.ID, fmt.Sprintf("✅ Настройка <b>%s</b> успешно обновлена!\n\n<i>Новое значение:</i> %s", keyToUpdate, newValue), keyboards.CustomizationMenu)
+			h.SendCleanMessage(msg.Chat.ID, fmt.Sprintf("✅ Настройка <b>%s</b> успешно обновлена!\n\n<i>Новое значение:</i> %s", keyToUpdate, newValue), keyboards.CustomizationMenu)
 		}
 
 		h.state.ClearState(msg.From.ID)
@@ -222,7 +251,7 @@ func (h *Handler) HandleWeeklyReportText(ctx context.Context, msg *tgbotapi.Mess
 	h.log.Info("received weekly report", "user_id", msg.From.ID, "text", reportText)
 
 	h.state.ClearState(msg.From.ID)
-	h.SendMessage(msg.Chat.ID, "✅ Ваш еженедельный отчет принят и сохранен.", keyboards.StudentMenu)
+	h.SendCleanMessage(msg.Chat.ID, "✅ Ваш еженедельный отчет принят и сохранен.", keyboards.StudentMenu)
 }
 
 func (h *Handler) HandleCourseCreationFlow(ctx context.Context, msg *tgbotapi.Message) {
@@ -233,7 +262,7 @@ func (h *Handler) HandleCourseCreationFlow(ctx context.Context, msg *tgbotapi.Me
 	h.log.Info("creating new course", "name", courseName)
 
 	h.state.ClearState(msg.From.ID)
-	h.SendMessage(msg.Chat.ID, "✅ Курс '"+courseName+"' успешно создан.", keyboards.AdminMenu)
+	h.SendCleanMessage(msg.Chat.ID, "✅ Курс '"+courseName+"' успешно создан.", keyboards.AdminMenu)
 }
 
 func (h *Handler) HandleCuratorSendReminderText(ctx context.Context, msg *tgbotapi.Message) {
@@ -246,9 +275,9 @@ func (h *Handler) HandleCuratorSendReminderText(ctx context.Context, msg *tgbota
 	err := h.userSvc.BroadcastToStudents(ctx, curatorID, reminderText)
 	if err != nil {
 		h.log.Error("failed to broadcast reminder", "curator_id", curatorID, "error", err)
-		h.SendMessage(msg.Chat.ID, "❌ Ошибка при отправке рассылки.", nil)
+		h.SendCleanMessage(msg.Chat.ID, "❌ Ошибка при отправке рассылки.", nil)
 	} else {
-		h.SendMessage(msg.Chat.ID, "✅ Напоминание отправлено всем вашим студентам.", keyboards.CuratorMenu)
+		h.SendCleanMessage(msg.Chat.ID, "✅ Напоминание отправлено всем вашим студентам.", keyboards.CuratorMenu)
 	}
 
 	h.state.ClearState(curatorID)
@@ -264,12 +293,12 @@ func (h *Handler) HandleCustomizationText(ctx context.Context, msg *tgbotapi.Mes
 	h.log.Info("updating bot customization", "admin_id", msg.From.ID, "state", state, "value", settingValue)
 
 	h.state.ClearState(msg.From.ID)
-	h.SendMessage(msg.Chat.ID, "✅ Настройки бота успешно обновлены.", keyboards.CustomizationMenu)
+	h.SendCleanMessage(msg.Chat.ID, "✅ Настройки бота успешно обновлены.", keyboards.CustomizationMenu)
 }
 
 func (h *Handler) HandleUnknown(ctx context.Context, msg *tgbotapi.Message) {
 	go func() {
 		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
 	}()
-	h.SendMessage(msg.Chat.ID, "Я не понимаю это сообщение. Пожалуйста, используйте меню.", nil)
+	h.SendCleanMessage(msg.Chat.ID, "Я не понимаю это сообщение. Пожалуйста, используйте меню.", nil)
 }
