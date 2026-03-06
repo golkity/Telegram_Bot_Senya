@@ -18,6 +18,7 @@ type ReportGenerator interface {
 type DataProvider interface {
 	GetStats(ctx context.Context, courseID string) ([]report.UserStat, error)
 	GetStrictSubmissionsReport(ctx context.Context) (*report.StrictReportData, error)
+	GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]report.UserStat, error)
 	GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error)
 	GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error)
 }
@@ -89,12 +90,18 @@ func ProcessReportJob(
 		fileName = fmt.Sprintf("student_sheets_%s.xlsx", time.Now().Format("2006-01-02_15-04"))
 
 	default:
-		data, errGet := provider.GetStats(ctx, task.CourseID)
+		data, errGet := provider.GetCuratorStatsReport(ctx, task.AdminChatID)
 		if errGet != nil {
 			log.Error("failed to fetch stats", "error", errGet)
 			_ = sender.SendFile(task.AdminChatID, nil, "", "❌ Ошибка сбора данных куратора :(")
 			return
 		}
+
+		if len(data) == 0 {
+			_ = sender.SendFile(task.AdminChatID, nil, "", "📭 У вас пока нет учеников для формирования отчета.")
+			return
+		}
+
 		fileBytes, err = gen.GenerateStatsReport(data)
 		fileName = fmt.Sprintf("curator_report_%s.xlsx", time.Now().Format("2006-01-02_15-04"))
 	}
