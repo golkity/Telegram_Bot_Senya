@@ -90,8 +90,8 @@ func (r *repo) Create(ctx context.Context, u User) error {
 
 func (r *repo) GetByID(ctx context.Context, id int64) (*User, error) {
 	q := `
-       SELECT u.user_id, u.username, u.first_name, u.last_name, 
-              ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications 
+       SELECT u.user_id, COALESCE(u.username, ''), COALESCE(u.first_name, ''), COALESCE(u.last_name, ''), 
+              COALESCE(ur.role, 'student'), ur.course_id, ur.curator_id, u.registration_date, COALESCE(ur.admin_notifications, false) 
        FROM users u
        LEFT JOIN user_roles ur ON u.user_id = ur.user_id
        WHERE u.user_id = $1
@@ -195,7 +195,8 @@ func (r *repo) GetCuratorsByCourse(ctx context.Context, courseID string) ([]User
               ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications
        FROM users u
        JOIN user_roles ur ON u.user_id = ur.user_id
-       WHERE ur.role = 'curator' AND ur.course_id = $1
+       JOIN curator_courses cc ON u.user_id = cc.curator_id -- ВОТ ОН, СПАСИТЕЛЬНЫЙ JOIN
+       WHERE ur.role = 'curator' AND cc.course_id = $1
     `
 	rows, err := r.db.Pool.Query(ctx, q, courseID)
 	if err != nil {
