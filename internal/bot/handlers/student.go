@@ -34,7 +34,7 @@ func (h *Handler) HandleStudentJoinCourse(ctx context.Context, msg *tgbotapi.Mes
 
 	h.state.ClearState(msg.From.ID)
 
-	h.SendMessage(msg.Chat.ID, fmt.Sprintf("✅ Вы успешно записаны на курс: **%s**", course.Name), nil)
+	h.SendMessage(msg.Chat.ID, fmt.Sprintf("✅ Вы успешно записаны на курс: <b>%s</b>", course.Name), nil)
 
 	h.HandleCuratorSelectionForStudent(ctx, msg)
 }
@@ -65,7 +65,7 @@ func (h *Handler) HandleGetArchive(ctx context.Context, msg *tgbotapi.Message) {
 			return
 		}
 
-		text := fmt.Sprintf("✅ **Ваш архив готов!**\n\n🔗 [Скачать архив](%s)\n\nСсылка действительна 24 часа.", archiveURL)
+		text := fmt.Sprintf("✅ <b>Ваш архив готов!</b>\n\n🔗 [Скачать архив](%s)\n\nСсылка действительна 24 часа.", archiveURL)
 
 		msgObj := tgbotapi.NewMessage(msg.Chat.ID, text)
 		msgObj.ParseMode = "Markdown"
@@ -85,7 +85,7 @@ func (h *Handler) HandleDailyStatistics(ctx context.Context, msg *tgbotapi.Messa
 		return
 	}
 
-	text := fmt.Sprintf("📊 **Статистика за сегодня (%s):**\n\n"+
+	text := fmt.Sprintf("📊 <b>Статистика за сегодня (%s):</b>\n\n"+
 		"📚 ДЗ: %s\n"+
 		"📝 Конспект: %s\n\n"+
 		"Сдано заданий: %d",
@@ -110,7 +110,7 @@ func (h *Handler) HandleWeeklyReportSubmission(ctx context.Context, msg *tgbotap
 
 	h.state.SetState(msg.From.ID, StateWaitingForWeeklyReport)
 	h.SendMessage(msg.Chat.ID,
-		"📝 **Еженедельный отчет куратору**\n\n"+
+		"📝 <b>Еженедельный отчет куратору</b>\n\n"+
 			"Напишите одним сообщением:\n"+
 			"1. Что изучили за неделю?\n"+
 			"2. Какие были трудности?\n"+
