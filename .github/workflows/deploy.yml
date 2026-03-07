@@ -1,0 +1,28 @@
+name: 🚀 Production Deploy
+
+on:
+  push:
+    branches: [ main ]
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    steps:
+      - name: 🚚 Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.HOST }}
+          username: ${{ secrets.USERNAME }}
+          key: ${{ secrets.SSH_KEY }}
+          port: 22
+          script: |
+            cd ~/bot_project
+            
+            git pull origin main
+            
+            sudo docker compose up -d --build bot
+            
+            sudo docker image prune -f
+        
+            sudo docker ps | grep bot
