@@ -2,7 +2,7 @@ name: 🚀 Production Deploy
 
 on:
   push:
-    branches: [ main ]
+    branches: [ master ]
   workflow_dispatch:
 
 jobs:
@@ -19,7 +19,7 @@ jobs:
           script: |
             cd ~/Telegram_Bot_Senya
             
-            git pull origin main
+            git pull origin master
             
             sudo docker compose up -d --build bot
             
