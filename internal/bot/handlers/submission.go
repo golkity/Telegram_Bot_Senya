@@ -290,8 +290,11 @@ func (h *Handler) HandleSubmissionFinalize(ctx context.Context, msg *tgbotapi.Me
 	}
 	h.DeleteMessages(msg.Chat.ID, garbageIDs)
 
-	waitMsgConfig := tgbotapi.NewMessage(msg.Chat.ID, "⏳ Обрабатываю и сохраняю...")
-	waitMsg, _ := h.bot.Send(waitMsgConfig)
+	waitMsgConfig := tgbotapi.NewMessage(msg.Chat.ID, "⏳ Обрабатываю и сохраняю файлы...")
+	waitMsg, err := h.bot.Send(waitMsgConfig)
+	if err != nil {
+		h.log.Error("failed to send wait message", "error", err)
+	}
 
 	rawType := h.state.GetData(userID, "type")
 	sType := "homework"
@@ -316,18 +319,17 @@ func (h *Handler) HandleSubmissionFinalize(ctx context.Context, msg *tgbotapi.Me
 
 	var files []submission.FileDTO
 	rawFiles := h.state.GetData(userID, "files")
-
 	if f, ok := rawFiles.([]submission.FileDTO); ok {
 		files = f
 	} else if rawArray, ok := rawFiles.([]interface{}); ok {
 		for _, item := range rawArray {
 			if m, ok := item.(map[string]interface{}); ok {
 				var file submission.FileDTO
-				if fileID, ok := m["FileID"].(string); ok {
-					file.FileID = fileID
+				if fid, ok := m["FileID"].(string); ok {
+					file.FileID = fid
 				}
-				if fileName, ok := m["FileName"].(string); ok {
-					file.FileName = fileName
+				if fname, ok := m["FileName"].(string); ok {
+					file.FileName = fname
 				}
 				if sizeFloat, ok := m["Size"].(float64); ok {
 					file.Size = int64(sizeFloat)
@@ -336,8 +338,6 @@ func (h *Handler) HandleSubmissionFinalize(ctx context.Context, msg *tgbotapi.Me
 			}
 		}
 	}
-
-	h.log.Info("Finalize submission", "files_count", len(files), "rawFiles_type", fmt.Sprintf("%T", rawFiles))
 
 	u, _ := h.userSvc.GetUserInfo(ctx, userID)
 	studentName := "Unknown_Student"
@@ -371,17 +371,19 @@ func (h *Handler) HandleSubmissionFinalize(ctx context.Context, msg *tgbotapi.Me
 
 	if err := h.submissionSvc.ProcessSubmission(ctx, input); err != nil {
 		h.log.Error("submission save failed", "err", err)
-		h.SendMessage(msg.Chat.ID, "❌ Ошибка сохранения. Попробуйте позже.", keyboards.StudentMenu)
+		h.SendMessage(msg.Chat.ID, "❌ Ошибка сохранения. Пожалуйста, попробуй позже.", keyboards.StudentMenu)
 	} else {
 		if curatorID != 0 && curatorID != userID {
 			notification := fmt.Sprintf("🔔 <b>Новая сдача!</b>\n👤 %s\n📚 %s: %s\n📎 Файлов: %d",
 				studentName, sType, task, len(files))
 
-			message := tgbotapi.NewMessage(curatorID, notification)
-			message.ParseMode = "HTML"
-			if _, err := h.bot.Send(message); err != nil {
-				h.log.Error("failed to notify curator", "curator_id", curatorID, "error", err)
-			}
+			go func(cID int64, text string) {
+				m := tgbotapi.NewMessage(cID, text)
+				m.ParseMode = "HTML"
+				if _, err := h.bot.Send(m); err != nil {
+					h.log.Error("failed to notify curator (async)", "curator_id", cID, "error", err)
+				}
+			}(curatorID, notification)
 		}
 
 		h.SendMessage(msg.Chat.ID, "✅ Работа успешно сдана!", keyboards.StudentMenu)
