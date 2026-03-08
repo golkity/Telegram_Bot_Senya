@@ -39,10 +39,10 @@ func (r *repo) GetByKey(ctx context.Context, key string) (string, error) {
 
 func (r *repo) Update(ctx context.Context, key string, value string) error {
 	q := `
-		INSERT INTO cms_contents (key, content, description) 
-		VALUES ($1, $2, 'Auto-created')
-		ON CONFLICT (key) DO UPDATE SET content = $2
-	`
+       INSERT INTO cms_contents (key, content, description) 
+       VALUES ($1, $2, 'Auto-created')
+       ON CONFLICT (key) DO UPDATE SET content = $2
+    `
 	_, err := r.db.Pool.Exec(ctx, q, key, value)
 	return err
 }
@@ -55,7 +55,7 @@ func (r *repo) GetAll(ctx context.Context) ([]Content, error) {
 	}
 	defer rows.Close()
 
-	var contents []Content
+	contents := make([]Content, 0, 50)
 	for rows.Next() {
 		var c Content
 		if err := rows.Scan(&c.Key, &c.Value, &c.Description); err != nil {
@@ -63,16 +63,19 @@ func (r *repo) GetAll(ctx context.Context) ([]Content, error) {
 		}
 		contents = append(contents, c)
 	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return contents, nil
 }
 
 func (r *repo) UpdateSetting(ctx context.Context, key string, content string) error {
 	q := `
-		INSERT INTO cms_contents (key, content)
-		VALUES ($1, $2)
-		ON CONFLICT (key) DO UPDATE 
-		SET content = EXCLUDED.content
-	`
+       INSERT INTO cms_contents (key, content)
+       VALUES ($1, $2)
+       ON CONFLICT (key) DO UPDATE 
+       SET content = EXCLUDED.content
+    `
 	_, err := r.db.Pool.Exec(ctx, q, key, content)
 	if err != nil {
 		return fmt.Errorf("failed to upsert cms setting %s: %w", key, err)
