@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log/slog"
 	"runtime/debug"
+	"strings"
 	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
@@ -34,12 +35,14 @@ func (r *Router) logging(next HandlerFunc) HandlerFunc {
 			action = update.Message.Text
 			typeStr = "message"
 
+			caption := update.Message.Caption
+
 			if update.Message.Document != nil {
-				action = fmt.Sprintf("[Document] %s", update.Message.Document.FileName)
+				action = strings.TrimSpace(fmt.Sprintf("[Document] %s %s", update.Message.Document.FileName, caption))
 			} else if update.Message.Photo != nil {
-				action = "[Photo]"
+				action = strings.TrimSpace(fmt.Sprintf("[Photo] %s", caption))
 			} else if action == "" {
-				action = "[Other Media]"
+				action = strings.TrimSpace(fmt.Sprintf("[Other Media] %s", caption))
 			}
 
 		case update.CallbackQuery != nil:
@@ -58,18 +61,18 @@ func (r *Router) logging(next HandlerFunc) HandlerFunc {
 			typeStr = "unknown"
 		}
 
+		defer func() {
+			r.log.Info("update processed",
+				slog.String("type", typeStr),
+				slog.Int64("user_id", userID),
+				slog.String("username", username),
+				slog.String("action", action),
+				slog.Int("update_id", update.UpdateID),
+				slog.Duration("duration", time.Since(start)),
+			)
+		}()
+
 		next(ctx, update)
-
-		duration := time.Since(start)
-
-		r.log.Info("update processed",
-			slog.String("type", typeStr),
-			slog.Int64("user_id", userID),
-			slog.String("username", username),
-			slog.String("action", action),
-			slog.Int("update_id", update.UpdateID),
-			slog.Duration("duration", duration),
-		)
 	}
 }
 
