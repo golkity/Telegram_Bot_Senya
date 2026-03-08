@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"time"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -17,7 +18,6 @@ func New(token string) (*Client, error) {
 	if err != nil {
 		return nil, fmt.Errorf("telegram init failed: %w", err)
 	}
-	bot.Debug = true
 	return &Client{bot: bot}, nil
 }
 
@@ -43,11 +43,15 @@ func (c *Client) GetFileContent(fileID string) (io.ReadCloser, error) {
 	if err != nil {
 		return nil, fmt.Errorf("failed to get file info: %w", err)
 	}
+
 	link := fileInfo.Link(c.bot.Token)
-	resp, err := http.Get(link)
+
+	client := &http.Client{Timeout: 60 * time.Second}
+	resp, err := client.Get(link)
 	if err != nil {
 		return nil, fmt.Errorf("http download request failed: %w", err)
 	}
+
 	if resp.StatusCode != http.StatusOK {
 		resp.Body.Close()
 		return nil, fmt.Errorf("bad status: %s", resp.Status)
