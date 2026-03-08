@@ -70,7 +70,7 @@ func (r *repo) GetAllByUserID(ctx context.Context, userID int64) ([]Submission, 
 	}
 	defer rows.Close()
 
-	var subs []Submission
+	subs := make([]Submission, 0, 10)
 	for rows.Next() {
 		var s Submission
 		var curID *int64
@@ -84,6 +84,9 @@ func (r *repo) GetAllByUserID(ctx context.Context, userID int64) ([]Submission, 
 			s.CuratorID = *curID
 		}
 		subs = append(subs, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return subs, nil
 }
@@ -101,7 +104,7 @@ func (r *repo) GetByTask(ctx context.Context, userID int64, subType Type, taskNu
 	}
 	defer rows.Close()
 
-	var subs []Submission
+	subs := make([]Submission, 0, 10)
 	for rows.Next() {
 		var s Submission
 
@@ -109,6 +112,9 @@ func (r *repo) GetByTask(ctx context.Context, userID int64, subType Type, taskNu
 			return nil, err
 		}
 		subs = append(subs, s)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return subs, nil
 }
@@ -141,10 +147,10 @@ func (r *repo) GetByID(ctx context.Context, id int64) (*Submission, error) {
 
 func (r *repo) UpdatePathsAndCurator(ctx context.Context, subID int64, newCuratorID int64, newPaths []string) error {
 	q := `
-		UPDATE submissions 
-		SET curator_id = $1, file_paths = $2 
-		WHERE id = $3
-	`
+       UPDATE submissions 
+       SET curator_id = $1, file_paths = $2 
+       WHERE id = $3
+    `
 	_, err := r.db.Pool.Exec(ctx, q, newCuratorID, newPaths, subID)
 	return err
 }
