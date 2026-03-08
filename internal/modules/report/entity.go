@@ -12,6 +12,7 @@ type UserStat struct {
 	UserID        int64
 	Name          string
 	Role          string
+	NotesCount    int
 	HomeworkCount int
 	FilesCount    int
 	RegisteredAt  time.Time

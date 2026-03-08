@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/google/uuid"
+	"golang.org/x/sync/errgroup"
 
 	"telegram_bot/pkg/compressor"
 	"telegram_bot/pkg/crypto"
@@ -56,53 +57,82 @@ func NewService(
 }
 
 func (s *Service) ProcessSubmission(ctx context.Context, input InputDTO) error {
-	var s3Paths []string
-	var originalNames []string
+	s3Paths := make([]string, len(input.Files))
+	originalNames := make([]string, len(input.Files))
 
-	courseName := strings.ReplaceAll(input.CourseName, " ", "_")
-	curatorName := strings.ReplaceAll(input.CuratorName, " ", "_")
-	studentName := strings.ReplaceAll(input.StudentName, " ", "_")
+	// Подготовка имен
+	courseSafe := strings.ReplaceAll(input.CourseName, " ", "_")
+	curatorSafe := strings.ReplaceAll(input.CuratorName, " ", "_")
+	studentSafe := strings.ReplaceAll(input.StudentName, " ", "_")
 
-	for _, fileDTO := range input.Files {
-		safeFileName := strings.ReplaceAll(fileDTO.FileName, " ", "_")
-		s3Path := fmt.Sprintf("%s/%s/%s/Task_%s/%s_%s.bin.enc",
-			courseName, curatorName, studentName, input.TaskNumber, uuid.New().String()[:8], safeFileName)
+	// Считаем время старта всей пачки
+	batchStart := time.Now()
+	s.log.Info("Starting parallel processing", "files_count", len(input.Files))
 
-		originalStream, err := s.downloader.GetFileContent(fileDTO.FileID)
-		if err != nil {
-			return fmt.Errorf("telegram download error: %w", err)
-		}
+	// Ставим 5 одновременных потоков. Это оптимально для большинства VPS.
+	sem := make(chan struct{}, 5)
+	g, gCtx := errgroup.WithContext(ctx)
 
-		compressedStream := compressor.CompressStream(originalStream)
+	for i, file := range input.Files {
+		idx, fileDTO := i, file
+		g.Go(func() error {
+			sem <- struct{}{}
+			defer func() { <-sem }()
 
-		encryptedStream, err := crypto.EncryptStream(compressedStream, s.encKey)
-		if err != nil {
-			originalStream.Close()
-			return fmt.Errorf("encryption setup error: %w", err)
-		}
+			fileStart := time.Now()
+			s.log.Debug("Processing file started", "idx", idx, "name", fileDTO.FileName)
 
-		processedData, err := io.ReadAll(encryptedStream)
-		originalStream.Close()
-		if err != nil {
-			return fmt.Errorf("stream processing error: %w", err)
-		}
+			safeFileName := strings.ReplaceAll(fileDTO.FileName, " ", "_")
+			s3Path := fmt.Sprintf("%s/%s/%s/Task_%s/%s_%s.bin.enc",
+				courseSafe, curatorSafe, studentSafe, input.TaskNumber,
+				uuid.New().String()[:8], safeFileName)
 
-		err = s.uploader.UploadFile(
-			ctx,
-			s3Path,
-			bytes.NewReader(processedData),
-			int64(len(processedData)),
-			"application/octet-stream",
-		)
-		if err != nil {
-			return fmt.Errorf("s3 upload error: %w", err)
-		}
+			// 1. Скачивание
+			originalStream, err := s.downloader.GetFileContent(fileDTO.FileID)
+			if err != nil {
+				return fmt.Errorf("file %d download error: %w", idx, err)
+			}
+			defer originalStream.Close()
 
-		s3Paths = append(s3Paths, s3Path)
-		originalNames = append(originalNames, fileDTO.FileName)
+			// 2. Сжатие и шифрование в буфер
+			compressed := compressor.CompressStream(originalStream)
+			encrypted, err := crypto.EncryptStream(compressed, s.encKey)
+			if err != nil {
+				return err
+			}
+
+			processedData, err := io.ReadAll(encrypted)
+			if err != nil {
+				return err
+			}
+
+			// 3. Загрузка в S3
+			err = s.uploader.UploadFile(
+				gCtx,
+				s3Path,
+				bytes.NewReader(processedData),
+				int64(len(processedData)),
+				"application/octet-stream",
+			)
+			if err != nil {
+				return fmt.Errorf("file %d s3 upload error: %w", idx, err)
+			}
+
+			s3Paths[idx] = s3Path
+			originalNames[idx] = fileDTO.FileName
+
+			s.log.Debug("Processing file finished", "idx", idx, "duration", time.Since(fileStart))
+			return nil
+		})
 	}
 
-	sub := Submission{
+	if err := g.Wait(); err != nil {
+		return err
+	}
+
+	s.log.Info("All files processed parallel", "total_duration", time.Since(batchStart))
+
+	return s.repo.Save(ctx, Submission{
 		UserID:        input.UserID,
 		CuratorID:     input.CuratorID,
 		Type:          input.Type,
@@ -110,9 +140,7 @@ func (s *Service) ProcessSubmission(ctx context.Context, input InputDTO) error {
 		FilePaths:     s3Paths,
 		OriginalNames: originalNames,
 		Comment:       input.Comment,
-	}
-
-	return s.repo.Save(ctx, sub)
+	})
 }
 
 func (s *Service) GetAllSubmissions(ctx context.Context, userID int64) ([]Submission, error) {

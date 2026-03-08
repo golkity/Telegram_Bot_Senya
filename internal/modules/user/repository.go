@@ -112,7 +112,7 @@ func (r *repo) GetByID(ctx context.Context, id int64) (*User, error) {
 
 func (r *repo) GetAll(ctx context.Context) ([]User, error) {
 	q := `
-       SELECT u.user_id, u.username, u.first_name, u.last_name, 
+       SELECT u.user_id, COALESCE(u.username, ''), COALESCE(u.first_name, ''), COALESCE(u.last_name, ''), 
               ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications 
        FROM users u
        LEFT JOIN user_roles ur ON u.user_id = ur.user_id
@@ -167,7 +167,8 @@ func (r *repo) UpdateAdminNotifications(ctx context.Context, id int64, enabled b
 
 func (r *repo) GetByRole(ctx context.Context, role Role) ([]User, error) {
 	q := `
-       SELECT u.user_id, u.username, u.first_name, u.last_name, ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications
+       SELECT u.user_id, COALESCE(u.username, ''), COALESCE(u.first_name, ''), COALESCE(u.last_name, ''), 
+              ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications
        FROM users u
        JOIN user_roles ur ON u.user_id = ur.user_id
        WHERE ur.role = $1
@@ -197,7 +198,7 @@ func (r *repo) GetByRole(ctx context.Context, role Role) ([]User, error) {
 
 func (r *repo) GetCuratorsByCourse(ctx context.Context, courseID string) ([]User, error) {
 	q := `
-       SELECT u.user_id, COALESCE(u.username, ''), u.first_name, COALESCE(u.last_name, ''), 
+       SELECT u.user_id, COALESCE(u.username, ''), COALESCE(u.first_name, ''), COALESCE(u.last_name, ''), 
               ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications
        FROM users u
        JOIN user_roles ur ON u.user_id = ur.user_id
@@ -274,7 +275,8 @@ func (r *repo) GetCourseByName(ctx context.Context, name string) (*Course, error
 
 func (r *repo) GetByCuratorID(ctx context.Context, curatorID int64) ([]User, error) {
 	q := `
-       SELECT u.user_id, u.username, u.first_name, u.last_name, ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications
+       SELECT u.user_id, COALESCE(u.username, ''), COALESCE(u.first_name, ''), COALESCE(u.last_name, ''), 
+              ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications
        FROM users u
        JOIN user_roles ur ON u.user_id = ur.user_id
        WHERE ur.curator_id = $1
@@ -437,57 +439,6 @@ func (r *repo) GetStudentsCountByCurator(ctx context.Context) (map[string]int, e
 			return nil, err
 		}
 		stats[strings.TrimSpace(curatorName)] = count
-	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	return stats, nil
-}
-
-func (r *repo) GetUsersStatsReport(ctx context.Context, courseID string) ([]report.UserStat, error) {
-	q := `
-       SELECT 
-          u.user_id, 
-          TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS name,
-          COALESCE(ur.role, 'student') AS role,
-          COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
-          COUNT(s.id) AS total_files,
-          u.registration_date
-       FROM users u
-       LEFT JOIN user_roles ur ON u.user_id = ur.user_id
-       LEFT JOIN submissions s ON u.user_id = s.user_id
-       WHERE ($1::text = '' OR ur.course_id = $1)
-       GROUP BY u.user_id, u.first_name, u.last_name, ur.role, u.registration_date
-       ORDER BY ur.role, u.registration_date DESC
-    `
-
-	rows, err := r.db.Pool.Query(ctx, q, courseID)
-	if err != nil {
-		return nil, fmt.Errorf("db get users stats error: %w", err)
-	}
-	defer rows.Close()
-
-	stats := make([]report.UserStat, 0, 100)
-	for rows.Next() {
-		var stat report.UserStat
-		var name string
-
-		if err := rows.Scan(
-			&stat.UserID,
-			&name,
-			&stat.Role,
-			&stat.HomeworkCount,
-			&stat.FilesCount,
-			&stat.RegisteredAt,
-		); err != nil {
-			return nil, fmt.Errorf("scan error: %w", err)
-		}
-
-		if name == "" {
-			name = "Без имени"
-		}
-		stat.Name = name
-		stats = append(stats, stat)
 	}
 	if err := rows.Err(); err != nil {
 		return nil, err
@@ -769,11 +720,12 @@ func (r *repo) GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]re
           TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS name,
           COALESCE(ur.role, 'student') AS role,
           COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
+          COUNT(s.id) FILTER (WHERE s.submission_type = 'notes') AS notes_count,
           COUNT(s.id) AS total_files,
           u.registration_date
        FROM users u
        JOIN user_roles ur ON u.user_id = ur.user_id
-       LEFT JOIN submissions s ON u.user_id = s.user_id
+       LEFT JOIN submissions s ON u.user_id = s.user_id AND s.submission_date >= NOW() - INTERVAL '7 days'
        WHERE ur.curator_id = $1
        GROUP BY u.user_id, u.first_name, u.last_name, ur.role, u.registration_date
        ORDER BY u.registration_date DESC
@@ -795,6 +747,60 @@ func (r *repo) GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]re
 			&name,
 			&stat.Role,
 			&stat.HomeworkCount,
+			&stat.NotesCount,
+			&stat.FilesCount,
+			&stat.RegisteredAt,
+		); err != nil {
+			return nil, fmt.Errorf("scan error: %w", err)
+		}
+
+		if name == "" {
+			name = "Без имени"
+		}
+		stat.Name = name
+		stats = append(stats, stat)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	return stats, nil
+}
+
+func (r *repo) GetUsersStatsReport(ctx context.Context, courseID string) ([]report.UserStat, error) {
+	q := `
+       SELECT 
+          u.user_id, 
+          TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS name,
+          COALESCE(ur.role, 'student') AS role,
+          COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
+          COUNT(s.id) FILTER (WHERE s.submission_type = 'notes') AS notes_count,
+          COUNT(s.id) AS total_files,
+          u.registration_date
+       FROM users u
+       LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+       LEFT JOIN submissions s ON u.user_id = s.user_id AND s.submission_date >= NOW() - INTERVAL '7 days'
+       WHERE ($1::text = '' OR ur.course_id = $1)
+       GROUP BY u.user_id, u.first_name, u.last_name, ur.role, u.registration_date
+       ORDER BY ur.role, u.registration_date DESC
+    `
+
+	rows, err := r.db.Pool.Query(ctx, q, courseID)
+	if err != nil {
+		return nil, fmt.Errorf("db get users stats error: %w", err)
+	}
+	defer rows.Close()
+
+	stats := make([]report.UserStat, 0, 100)
+	for rows.Next() {
+		var stat report.UserStat
+		var name string
+
+		if err := rows.Scan(
+			&stat.UserID,
+			&name,
+			&stat.Role,
+			&stat.HomeworkCount,
+			&stat.NotesCount,
 			&stat.FilesCount,
 			&stat.RegisteredAt,
 		); err != nil {

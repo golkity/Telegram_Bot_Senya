@@ -16,45 +16,6 @@ import (
 
 type Generator struct{}
 
-func New() *Generator {
-	return &Generator{}
-}
-
-func (g *Generator) GenerateStatsReport(data []report.UserStat) ([]byte, error) {
-	f := excelize.NewFile()
-	defer f.Close()
-
-	sheet := "Статистика"
-	f.SetSheetName("Sheet1", sheet)
-
-	headers := []interface{}{"ID", "Имя", "Роль", "Сдано ДЗ", "Всего файлов", "Дата регистрации"}
-	f.SetSheetRow(sheet, "A1", &headers)
-
-	for i, u := range data {
-		row := i + 2
-		rowData := []interface{}{
-			u.UserID, u.Name, u.Role, u.HomeworkCount, u.FilesCount, u.RegisteredAt.Format(time.DateTime),
-		}
-		f.SetSheetRow(sheet, fmt.Sprintf("A%d", row), &rowData)
-	}
-
-	f.SetColWidth(sheet, "A", "F", 20)
-
-	if len(data) > 0 {
-		f.AddTable(sheet, &excelize.Table{
-			Range:     fmt.Sprintf("A1:F%d", len(data)+1),
-			Name:      "UsersTable",
-			StyleName: "TableStyleMedium2",
-		})
-	}
-
-	buf, err := f.WriteToBuffer()
-	if err != nil {
-		return nil, err
-	}
-	return buf.Bytes(), nil
-}
-
 type StrictSubmissionsStream struct {
 	f                *excelize.File
 	sheet            string
@@ -66,6 +27,45 @@ type StrictSubmissionsStream struct {
 	sectionStyle     int
 	userHeaderStyle  int
 	tableHeaderStyle int
+}
+
+func New() *Generator {
+	return &Generator{}
+}
+
+func (g *Generator) GenerateStatsReport(data []report.UserStat) ([]byte, error) {
+	f := excelize.NewFile()
+	defer f.Close()
+
+	sheet := "Статистика за неделю"
+	f.SetSheetName("Sheet1", sheet)
+
+	headers := []interface{}{"ID", "Имя", "Роль", "Сдано ДЗ (за 7 дней)", "Конспектов (за 7 дней)", "Всего файлов (за 7 дней)", "Дата регистрации"}
+	f.SetSheetRow(sheet, "A1", &headers)
+
+	for i, u := range data {
+		row := i + 2
+		rowData := []interface{}{
+			u.UserID, u.Name, u.Role, u.HomeworkCount, u.NotesCount, u.FilesCount, u.RegisteredAt.Format(time.DateTime),
+		}
+		f.SetSheetRow(sheet, fmt.Sprintf("A%d", row), &rowData)
+	}
+
+	f.SetColWidth(sheet, "A", "G", 20)
+
+	if len(data) > 0 {
+		f.AddTable(sheet, &excelize.Table{
+			Range:     fmt.Sprintf("A1:G%d", len(data)+1),
+			Name:      "UsersTable",
+			StyleName: "TableStyleMedium2",
+		})
+	}
+
+	buf, err := f.WriteToBuffer()
+	if err != nil {
+		return nil, err
+	}
+	return buf.Bytes(), nil
 }
 
 func (g *Generator) NewStrictSubmissionsStream() (worker.StrictReportStream, error) {

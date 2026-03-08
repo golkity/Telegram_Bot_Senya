@@ -23,7 +23,7 @@ var StudentMenu = tgbotapi.NewReplyKeyboard(
 var CuratorMenu = tgbotapi.NewReplyKeyboard(
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("📝 Отправить напоминание"),
-		tgbotapi.NewKeyboardButton("📊 Мой ежедневный отчет"),
+		//tgbotapi.NewKeyboardButton("📊 Мой ежедневный отчет"),
 	),
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("📈 Мой еженедельный отчет"),
@@ -32,10 +32,9 @@ var CuratorMenu = tgbotapi.NewReplyKeyboard(
 		tgbotapi.NewKeyboardButton("📋 Отчет по сдаче (Excel)"),
 		tgbotapi.NewKeyboardButton("👤 Мои ученики"),
 	),
-	tgbotapi.NewKeyboardButtonRow(
-		tgbotapi.NewKeyboardButton("📊 Сводный отчет Excel"),
-		tgbotapi.NewKeyboardButton("📁 Просмотреть работы учеников"),
-	),
+	//tgbotapi.NewKeyboardButtonRow(
+	//	tgbotapi.NewKeyboardButton("📁 Просмотреть работы учеников"),
+	//),
 )
 
 var AdminMenu = tgbotapi.NewReplyKeyboard(
