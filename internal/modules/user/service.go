@@ -282,8 +282,8 @@ func (s *Service) GetSubmissionsReport(ctx context.Context) ([]report.Submission
 	return s.repo.GetSubmissionsReport(ctx)
 }
 
-func (s *Service) GetStrictSubmissionsReport(ctx context.Context) (*report.StrictReportData, error) {
-	return s.repo.GetStrictSubmissionsReport(ctx)
+func (s *Service) StreamStrictSubmissionsReport(ctx context.Context, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error) {
+	return s.repo.StreamStrictSubmissionsReport(ctx, rowCallback)
 }
 
 func (s *Service) GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error) {

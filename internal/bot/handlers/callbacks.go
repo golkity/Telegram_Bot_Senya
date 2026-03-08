@@ -12,27 +12,30 @@ import (
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+var adminCommands = map[string]bool{
+	"manage_user":         true,
+	"delete_user":         true,
+	"confirm_delete":      true,
+	"user_stats":          true,
+	"set_role":            true,
+	"assign_course_menu":  true,
+	"assign_curator_menu": true,
+	"gen_excel":           true,
+}
+
 func (h *Handler) HandleCallback(ctx context.Context, callback *tgbotapi.CallbackQuery) {
+	defer h.AnswerCallback(callback.ID, "")
+
 	data := callback.Data
 	parts := strings.Split(data, ":")
+	if len(parts) == 0 {
+		return
+	}
 	cmd := parts[0]
-
-	defer h.AnswerCallback(callback.ID, "")
 
 	initiator, err := h.userSvc.GetUserInfo(ctx, callback.From.ID)
 	if err != nil {
 		return
-	}
-
-	adminCommands := map[string]bool{
-		"manage_user":         true,
-		"delete_user":         true,
-		"confirm_delete":      true,
-		"user_stats":          true,
-		"set_role":            true,
-		"assign_course_menu":  true,
-		"assign_curator_menu": true,
-		"gen_excel":           true,
 	}
 
 	if adminCommands[cmd] && initiator.Role != user.RoleAdmin {
@@ -42,18 +45,30 @@ func (h *Handler) HandleCallback(ctx context.Context, callback *tgbotapi.Callbac
 
 	switch cmd {
 	case "manage_user":
+		if len(parts) < 2 {
+			return
+		}
 		userID, _ := strconv.ParseInt(parts[1], 10, 64)
 		h.showUserActions(ctx, callback.Message.Chat.ID, userID)
 
 	case "delete_user":
+		if len(parts) < 2 {
+			return
+		}
 		userID, _ := strconv.ParseInt(parts[1], 10, 64)
 		h.confirmDeleteUser(ctx, callback.Message.Chat.ID, userID)
 
 	case "confirm_delete":
+		if len(parts) < 2 {
+			return
+		}
 		userID, _ := strconv.ParseInt(parts[1], 10, 64)
 		h.executeDeleteUser(ctx, callback.Message.Chat.ID, userID)
 
 	case "user_stats":
+		if len(parts) < 2 {
+			return
+		}
 		userID, _ := strconv.ParseInt(parts[1], 10, 64)
 		h.showUserStats(ctx, callback.Message.Chat.ID, userID)
 
@@ -66,14 +81,23 @@ func (h *Handler) HandleCallback(ctx context.Context, callback *tgbotapi.Callbac
 		h.executeSetRole(ctx, callback.Message.Chat.ID, targetID, newRole)
 
 	case "assign_course_menu":
+		if len(parts) < 2 {
+			return
+		}
 		targetID, _ := strconv.ParseInt(parts[1], 10, 64)
 		h.showCourseAssignment(ctx, callback.Message.Chat.ID, targetID)
 
 	case "assign_curator_menu":
+		if len(parts) < 2 {
+			return
+		}
 		targetID, _ := strconv.ParseInt(parts[1], 10, 64)
 		h.showCuratorAssignment(ctx, callback.Message.Chat.ID, targetID)
 
 	case "view_works":
+		if len(parts) < 2 {
+			return
+		}
 		studentID, _ := strconv.ParseInt(parts[1], 10, 64)
 		h.showStudentTaskMenu(ctx, callback.Message.Chat.ID, studentID)
 
@@ -87,17 +111,24 @@ func (h *Handler) HandleCallback(ctx context.Context, callback *tgbotapi.Callbac
 		h.showStudentSubmissionsForTask(ctx, callback.Message.Chat.ID, studentID, subType, taskNum)
 
 	case "sub_details":
+		if len(parts) < 2 {
+			return
+		}
 		subID, _ := strconv.ParseInt(parts[1], 10, 64)
 		h.showSubmissionDetails(ctx, callback.Message.Chat.ID, subID)
 
 	case "dl_file":
+		if len(parts) < 3 {
+			return
+		}
+		subID, _ := strconv.ParseInt(parts[1], 10, 64)
+		fileIndex, _ := strconv.Atoi(parts[2])
+		h.sendSubmissionFile(ctx, callback.Message.Chat.ID, subID, fileIndex)
+
+	case "dev_attach":
 		if len(parts) < 2 {
 			return
 		}
-		fileID := parts[1]
-		h.sendSubmissionFile(ctx, callback.Message.Chat.ID, fileID)
-
-	case "dev_attach":
 		curatorID, _ := strconv.ParseInt(parts[1], 10, 64)
 		h.attachDeveloper(ctx, callback.From.ID, curatorID, callback.Message.Chat.ID)
 
@@ -251,13 +282,13 @@ func (h *Handler) showSubmissionDetails(ctx context.Context, chatID int64, subID
 	text := fmt.Sprintf("📄 Сдача #%d\nКоммент: %s\nФайлов: %d", sub.ID, sub.Comment, len(sub.FilePaths))
 
 	var rows [][]tgbotapi.InlineKeyboardButton
-	for i, path := range sub.FilePaths {
+	for i := range sub.FilePaths {
 		name := "Файл " + strconv.Itoa(i+1)
 		if i < len(sub.OriginalNames) {
 			name = sub.OriginalNames[i]
 		}
 
-		data := fmt.Sprintf("dl_file:%s", path)
+		data := fmt.Sprintf("dl_file:%d:%d", sub.ID, i)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData("⬇️ "+name, data),
 		))
@@ -265,8 +296,14 @@ func (h *Handler) showSubmissionDetails(ctx context.Context, chatID int64, subID
 	h.SendMessage(chatID, text, tgbotapi.NewInlineKeyboardMarkup(rows...))
 }
 
-func (h *Handler) sendSubmissionFile(ctx context.Context, chatID int64, fileID string) {
-	url, err := h.submissionSvc.GetFileLink(ctx, fileID)
+func (h *Handler) sendSubmissionFile(ctx context.Context, chatID int64, subID int64, fileIndex int) {
+	sub, err := h.submissionSvc.GetSubmissionByID(ctx, subID)
+	if err != nil || fileIndex < 0 || fileIndex >= len(sub.FilePaths) {
+		h.SendMessage(chatID, "❌ Файл не найден", nil)
+		return
+	}
+
+	url, err := h.submissionSvc.GetFileLink(ctx, sub.FilePaths[fileIndex])
 	if err != nil {
 		h.SendMessage(chatID, "❌ Файл недоступен", nil)
 		return

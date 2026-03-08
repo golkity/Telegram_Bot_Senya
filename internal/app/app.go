@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/signal"
 	"syscall"
+	"time"
 
 	"telegram_bot/internal/bot"
 	"telegram_bot/internal/bot/handlers"
@@ -58,7 +59,9 @@ func Run(cfg *Config) {
 	}
 	defer redisClient.Close()
 
-	s3Client, err := s3.New(context.Background(), cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket)
+	s3Ctx, s3Cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	s3Client, err := s3.New(s3Ctx, cfg.S3Endpoint, cfg.S3AccessKey, cfg.S3SecretKey, cfg.S3Bucket)
+	s3Cancel()
 	if err != nil {
 		logger.Error("s3 init failed", "err", err)
 		os.Exit(1)
@@ -114,10 +117,10 @@ func Run(cfg *Config) {
 	})
 	cron.Start(ctx)
 
+	metricsServer := &http.Server{Addr: ":2112", Handler: promhttp.Handler()}
 	go func() {
 		logger.Info("Starting Prometheus metrics server on :2112")
-		http.Handle("/metrics", promhttp.Handler())
-		if err := http.ListenAndServe(":2112", nil); err != nil {
+		if err := metricsServer.ListenAndServe(); err != nil && err != http.ErrServerClosed {
 			logger.Error("Prometheus metrics server failed", "err", err)
 		}
 	}()
@@ -131,5 +134,11 @@ func Run(cfg *Config) {
 	<-quit
 
 	logger.Info("Shutting down...")
+
+	shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer shutdownCancel()
+
 	reportWorkerPool.Stop()
+	metricsServer.Shutdown(shutdownCtx)
+	logger.Info("Stop completed")
 }

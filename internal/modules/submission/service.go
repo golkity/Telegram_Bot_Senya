@@ -4,12 +4,10 @@ import (
 	"archive/zip"
 	"bytes"
 	"context"
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/hex"
 	"fmt"
 	"io"
 	"log/slog"
+	"os"
 	"strings"
 	"time"
 
@@ -35,9 +33,8 @@ type Service struct {
 	uploader   FileUploader
 	downloader FileDownloader
 	log        *slog.Logger
-
-	encKey   []byte
-	pathSalt []byte
+	encKey     []byte
+	pathSalt   []byte
 }
 
 func NewService(
@@ -56,15 +53,6 @@ func NewService(
 		encKey:     []byte(encKey),
 		pathSalt:   []byte(pathSalt),
 	}
-}
-
-func (s *Service) GenerateS3Path(userID int64, taskNumber string) string {
-	mac := hmac.New(sha256.New, s.pathSalt)
-	mac.Write([]byte(fmt.Sprintf("%d", userID)))
-	userHash := hex.EncodeToString(mac.Sum(nil))[:16]
-
-	newFileName := uuid.New().String() + ".bin.enc"
-	return fmt.Sprintf("%s/task_%s/%s", userHash, taskNumber, newFileName)
 }
 
 func (s *Service) ProcessSubmission(ctx context.Context, input InputDTO) error {
@@ -159,8 +147,14 @@ func (s *Service) GenerateUserArchive(ctx context.Context, userID int64) (string
 		return "", err
 	}
 
-	buf := new(bytes.Buffer)
-	zipWriter := zip.NewWriter(buf)
+	tempFile, err := os.CreateTemp("", fmt.Sprintf("archive_%d_*.zip", userID))
+	if err != nil {
+		return "", fmt.Errorf("failed to create temp file: %w", err)
+	}
+	defer os.Remove(tempFile.Name())
+	defer tempFile.Close()
+
+	zipWriter := zip.NewWriter(tempFile)
 
 	for _, sub := range submissions {
 		for i, s3Path := range sub.FilePaths {
@@ -170,33 +164,36 @@ func (s *Service) GenerateUserArchive(ctx context.Context, userID int64) (string
 			}
 
 			zipEntryName := fmt.Sprintf("Task_%s/%s", sub.TaskNumber, originalName)
-			s3Stream, err := s.uploader.DownloadFile(ctx, s3Path)
+
+			err := func() error {
+				s3Stream, err := s.uploader.DownloadFile(ctx, s3Path)
+				if err != nil {
+					return fmt.Errorf("s3 download failed: %w", err)
+				}
+				defer s3Stream.Close()
+
+				decryptedStream, err := crypto.DecryptStream(s3Stream, s.encKey)
+				if err != nil {
+					return fmt.Errorf("decryption failed: %w", err)
+				}
+
+				decompressedStream, err := compressor.DecompressStream(decryptedStream)
+				if err != nil {
+					return fmt.Errorf("decompression failed: %w", err)
+				}
+
+				writer, err := zipWriter.Create(zipEntryName)
+				if err != nil {
+					return fmt.Errorf("zip create failed: %w", err)
+				}
+
+				_, err = io.Copy(writer, decompressedStream)
+				return err
+			}()
 
 			if err != nil {
-				s.log.Error("archive: s3 download failed", "path", s3Path, "err", err)
-				continue
+				s.log.Error("archive: skipping file due to error", "path", s3Path, "err", err)
 			}
-
-			decryptedStream, err := crypto.DecryptStream(s3Stream, s.encKey)
-			if err != nil {
-				s.log.Error("archive: decryption failed", "err", err)
-				s3Stream.Close()
-				continue
-			}
-
-			decompressedStream, err := compressor.DecompressStream(decryptedStream)
-			if err != nil {
-				s.log.Error("archive: decompression failed", "err", err)
-				s3Stream.Close()
-				continue
-			}
-
-			writer, err := zipWriter.Create(zipEntryName)
-			if err == nil {
-				io.Copy(writer, decompressedStream)
-			}
-
-			s3Stream.Close()
 		}
 	}
 
@@ -204,8 +201,11 @@ func (s *Service) GenerateUserArchive(ctx context.Context, userID int64) (string
 		return "", err
 	}
 
+	tempFile.Seek(0, 0)
+	stat, _ := tempFile.Stat()
+
 	archivePath := fmt.Sprintf("archives/student_%d/archive_%d.zip", userID, time.Now().Unix())
-	if err := s.uploader.UploadFile(ctx, archivePath, bytes.NewReader(buf.Bytes()), int64(buf.Len()), "application/zip"); err != nil {
+	if err := s.uploader.UploadFile(ctx, archivePath, tempFile, stat.Size(), "application/zip"); err != nil {
 		return "", err
 	}
 
@@ -227,7 +227,6 @@ func (s *Service) MigrateStudentFiles(ctx context.Context, studentID int64, newC
 		for _, oldPath := range sub.FilePaths {
 			parts := strings.Split(oldPath, "/")
 			if len(parts) >= 5 {
-
 				if parts[1] != safeNewCurator {
 					parts[1] = safeNewCurator
 					newPath := strings.Join(parts, "/")

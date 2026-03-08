@@ -27,7 +27,6 @@ var CuratorMenu = tgbotapi.NewReplyKeyboard(
 	),
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("📈 Мой еженедельный отчет"),
-		tgbotapi.NewKeyboardButton("📋 Word отчет (еженедельный)"),
 	),
 	tgbotapi.NewKeyboardButtonRow(
 		tgbotapi.NewKeyboardButton("📋 Отчет по сдаче (Excel)"),

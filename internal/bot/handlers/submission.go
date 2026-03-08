@@ -38,16 +38,30 @@ func (h *Handler) trackGarbageMsg(userID int64, msgID int) {
 	h.state.SetData(userID, "garbage_msgs", garbageIDs)
 }
 
+func (h *Handler) sendAndTrack(userID int64, chatID int64, text string, kb interface{}) {
+	msgConfig := tgbotapi.NewMessage(chatID, text)
+	msgConfig.ParseMode = "HTML"
+	if kb != nil {
+		msgConfig.ReplyMarkup = kb
+	}
+	sentMsg, err := h.bot.Send(msgConfig)
+	if err == nil {
+		h.trackGarbageMsg(userID, sentMsg.MessageID)
+	}
+}
+
 func (h *Handler) DeleteMessages(chatID int64, messageIDs []int) {
 	go func() {
 		for _, msgID := range messageIDs {
 			delMsg := tgbotapi.NewDeleteMessage(chatID, msgID)
-			h.bot.Request(delMsg)
+			_, _ = h.bot.Request(delMsg)
+			time.Sleep(50 * time.Millisecond) // Защита от лимитов Telegram (Too Many Requests)
 		}
 	}()
 }
 
 func (h *Handler) HandleSubmissionStart(ctx context.Context, msg *tgbotapi.Message, subType submission.Type) {
+	h.deleteUserMessage(msg)
 	userID := msg.From.ID
 
 	u, err := h.userSvc.GetUserInfo(ctx, userID)
@@ -75,28 +89,18 @@ func (h *Handler) HandleSubmissionStart(ctx context.Context, msg *tgbotapi.Messa
 		text = "конспект"
 	}
 
-	msgConfig := tgbotapi.NewMessage(msg.Chat.ID, fmt.Sprintf("📚 Сдача: %s\n📋 Выберите номер задания:", text))
-	msgConfig.ReplyMarkup = keyboards.GetTaskSelectionKeyboard()
-	sentMsg, err := h.bot.Send(msgConfig)
-	if err == nil {
-		h.trackGarbageMsg(userID, sentMsg.MessageID)
-	}
+	h.sendAndTrack(userID, msg.Chat.ID, fmt.Sprintf("📚 Сдача: %s\n📋 Выберите номер задания:", text), keyboards.GetTaskSelectionKeyboard())
 }
 
 func (h *Handler) HandleTaskSelection(ctx context.Context, msg *tgbotapi.Message) {
+	h.deleteUserMessage(msg)
 	text := msg.Text
 	userID := msg.From.ID
 
 	if text == "Созвоны с кураторами" {
 		h.state.SetData(userID, "task", "Созвоны")
 		h.state.SetState(userID, StateWaitingForFiles)
-
-		msgConfig := tgbotapi.NewMessage(msg.Chat.ID, "✅ Выбрано: Созвоны\n📤 Отправляйте файлы (скриншоты).")
-		msgConfig.ReplyMarkup = keyboards.SubmissionProcessMenu
-		sentMsg, err := h.bot.Send(msgConfig)
-		if err == nil {
-			h.trackGarbageMsg(userID, sentMsg.MessageID)
-		}
+		h.sendAndTrack(userID, msg.Chat.ID, "✅ Выбрано: Созвоны\n📤 Отправляйте файлы (скриншоты).", keyboards.SubmissionProcessMenu)
 		return
 	}
 
@@ -105,54 +109,37 @@ func (h *Handler) HandleTaskSelection(ctx context.Context, msg *tgbotapi.Message
 		h.state.SetData(userID, "task_category", "Practice")
 
 		categories := []string{"Python", "Теория", "Сети", "Excel", "LibreOffice"}
-		var rows [][]tgbotapi.KeyboardButton
+		rows := make([][]tgbotapi.KeyboardButton, 0, len(categories)+1)
 		for _, cat := range categories {
 			rows = append(rows, tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(cat)))
 		}
 		rows = append(rows, tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton("↩️ Назад")))
 
-		msgConfig := tgbotapi.NewMessage(msg.Chat.ID, "📋 Выберите категорию практики:")
-		msgConfig.ReplyMarkup = tgbotapi.NewReplyKeyboard(rows...)
-		sentMsg, err := h.bot.Send(msgConfig)
-		if err == nil {
-			h.trackGarbageMsg(userID, sentMsg.MessageID)
-		}
+		h.sendAndTrack(userID, msg.Chat.ID, "📋 Выберите категорию практики:", tgbotapi.NewReplyKeyboard(rows...))
 		return
 	}
 
 	if strings.HasPrefix(text, "Задание ") {
 		taskNum := strings.TrimPrefix(text, "Задание ")
-
 		subtasks, err := h.submissionSvc.GetSubtasks(ctx, taskNum)
 
 		if err == nil && len(subtasks) > 0 {
 			h.state.SetState(userID, StateWaitingForSubtask)
 			h.state.SetData(userID, "task_parent", taskNum)
 
-			var rows [][]tgbotapi.KeyboardButton
+			rows := make([][]tgbotapi.KeyboardButton, 0, len(subtasks)+1)
 			for _, sub := range subtasks {
 				rows = append(rows, tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(sub.Name)))
 			}
 			rows = append(rows, tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton("↩️ Назад")))
 
-			msgConfig := tgbotapi.NewMessage(msg.Chat.ID, fmt.Sprintf("📋 Задание %s имеет подтемы. Выберите:", taskNum))
-			msgConfig.ReplyMarkup = tgbotapi.NewReplyKeyboard(rows...)
-			sentMsg, sendErr := h.bot.Send(msgConfig)
-			if sendErr == nil {
-				h.trackGarbageMsg(userID, sentMsg.MessageID)
-			}
+			h.sendAndTrack(userID, msg.Chat.ID, fmt.Sprintf("📋 Задание %s имеет подтемы. Выберите:", taskNum), tgbotapi.NewReplyKeyboard(rows...))
 			return
 		}
 
 		h.state.SetData(userID, "task", taskNum)
 		h.state.SetState(userID, StateWaitingForFiles)
-
-		msgConfig := tgbotapi.NewMessage(msg.Chat.ID, fmt.Sprintf("✅ Выбрано: Задание %s\n📤 Отправляйте файлы (можно несколько).", taskNum))
-		msgConfig.ReplyMarkup = keyboards.SubmissionProcessMenu
-		sentMsg, sendErr := h.bot.Send(msgConfig)
-		if sendErr == nil {
-			h.trackGarbageMsg(userID, sentMsg.MessageID)
-		}
+		h.sendAndTrack(userID, msg.Chat.ID, fmt.Sprintf("✅ Выбрано: Задание %s\n📤 Отправляйте файлы (можно несколько).", taskNum), keyboards.SubmissionProcessMenu)
 		return
 	}
 
@@ -160,18 +147,13 @@ func (h *Handler) HandleTaskSelection(ctx context.Context, msg *tgbotapi.Message
 }
 
 func (h *Handler) HandleSubtaskSelection(_ context.Context, msg *tgbotapi.Message) {
+	h.deleteUserMessage(msg)
 	subtaskName := msg.Text
 	userID := msg.From.ID
 
 	h.state.SetData(userID, "task", subtaskName)
 	h.state.SetState(userID, StateWaitingForFiles)
-
-	msgConfig := tgbotapi.NewMessage(msg.Chat.ID, fmt.Sprintf("✅ Выбрано: %s\n📤 Отправляйте файлы.", subtaskName))
-	msgConfig.ReplyMarkup = keyboards.SubmissionProcessMenu
-	sentMsg, err := h.bot.Send(msgConfig)
-	if err == nil {
-		h.trackGarbageMsg(userID, sentMsg.MessageID)
-	}
+	h.sendAndTrack(userID, msg.Chat.ID, fmt.Sprintf("✅ Выбрано: %s\n📤 Отправляйте файлы.", subtaskName), keyboards.SubmissionProcessMenu)
 }
 
 func (h *Handler) HandleFileUpload(_ context.Context, msg *tgbotapi.Message) {
@@ -188,6 +170,7 @@ func (h *Handler) HandleFileUpload(_ context.Context, msg *tgbotapi.Message) {
 		name = fmt.Sprintf("photo_%d.jpg", time.Now().UnixNano())
 		size = int64(p.FileSize)
 	} else {
+		h.deleteUserMessage(msg)
 		h.SendMessage(msg.Chat.ID, "❌ Я понимаю только файлы и фото. Текст отправьте позже в комментарии.", nil)
 		return
 	}
@@ -231,23 +214,16 @@ func (h *Handler) HandleFileUpload(_ context.Context, msg *tgbotapi.Message) {
 	mu.Unlock()
 
 	if msg.MediaGroupID == "" {
-		msgConfig := tgbotapi.NewMessage(msg.Chat.ID, fmt.Sprintf("📥 Файл принят! (Всего: %d)\nОтправьте еще или нажмите 'Готово'.", totalFiles))
-		sentMsg, err := h.bot.Send(msgConfig)
-		if err == nil {
-			h.trackGarbageMsg(userID, sentMsg.MessageID)
-		}
+		h.sendAndTrack(userID, msg.Chat.ID, fmt.Sprintf("📥 Файл принят! (Всего: %d)\nОтправьте еще или нажмите 'Готово'.", totalFiles), nil)
 	} else if totalFiles == 1 {
-		msgConfig := tgbotapi.NewMessage(msg.Chat.ID, "📥 Загружаю альбом файлов...\nНажмите 'Готово', когда все файлы прогрузятся.")
-		sentMsg, err := h.bot.Send(msgConfig)
-		if err == nil {
-			h.trackGarbageMsg(userID, sentMsg.MessageID)
-		}
+		h.sendAndTrack(userID, msg.Chat.ID, "📥 Загружаю альбом файлов...\nНажмите 'Готово', когда все файлы прогрузятся.", nil)
 	} else {
 		h.log.Info("Добавлено фото в альбом", "user_id", userID, "media_group", msg.MediaGroupID, "total", totalFiles)
 	}
 }
 
 func (h *Handler) HandleSubmissionDone(ctx context.Context, msg *tgbotapi.Message) {
+	h.deleteUserMessage(msg)
 	userID := msg.From.ID
 	rawFiles := h.state.GetData(userID, "files")
 
@@ -289,24 +265,15 @@ func (h *Handler) HandleSubmissionDone(ctx context.Context, msg *tgbotapi.Messag
 	h.state.SetData(userID, "files", files)
 	h.state.SetState(userID, StateWaitingForComment)
 
-	msgConfig := tgbotapi.NewMessage(msg.Chat.ID, "📝 Напишите комментарий к работе или нажмите 'Пропустить'")
-	msgConfig.ReplyMarkup = keyboards.CommentMenu
-	sentMsg, err := h.bot.Send(msgConfig)
-	if err == nil {
-		h.trackGarbageMsg(userID, sentMsg.MessageID)
-	}
+	h.sendAndTrack(userID, msg.Chat.ID, "📝 Напишите комментарий к работе или нажмите 'Пропустить'", keyboards.CommentMenu)
 }
 
 func (h *Handler) HandleSubmissionFinalize(ctx context.Context, msg *tgbotapi.Message) {
+	h.deleteUserMessage(msg)
 	userID := msg.From.ID
 	comment := msg.Text
 
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
-
 	if comment == "Пропустить" {
-		go func() { h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID)) }()
 		comment = ""
 	}
 
@@ -422,7 +389,7 @@ func (h *Handler) HandleSubmissionFinalize(ctx context.Context, msg *tgbotapi.Me
 
 	if waitMsg.MessageID != 0 {
 		go func() {
-			h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, waitMsg.MessageID))
+			_, _ = h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, waitMsg.MessageID))
 		}()
 	}
 

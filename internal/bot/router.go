@@ -49,36 +49,17 @@ func (r *Router) Start() {
 	u.Timeout = 60
 
 	updates := r.bot.GetUpdatesChan(u)
+
 	safeHandler := r.WithMiddleware(r.handleUpdate)
 
 	for update := range updates {
 		updatesCounter.Inc()
-		go func(upd tgbotapi.Update) {
-			start := time.Now()
 
+		go func(upd tgbotapi.Update) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
 			defer cancel()
 
 			safeHandler(ctx, upd)
-
-			durationMs := time.Since(start).Milliseconds()
-
-			action := "unknown"
-			var userID int64
-			if upd.Message != nil {
-				action = "message"
-				userID = upd.Message.From.ID
-			} else if upd.CallbackQuery != nil {
-				action = "callback"
-				userID = upd.CallbackQuery.From.ID
-			}
-
-			r.log.Info("update processed",
-				"type", action,
-				"user_id", userID,
-				"update_id", upd.UpdateID,
-				"duration_ms", durationMs,
-			)
 		}(update)
 	}
 }

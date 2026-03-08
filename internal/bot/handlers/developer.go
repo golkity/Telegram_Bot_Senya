@@ -5,21 +5,36 @@ import (
 	"fmt"
 
 	"telegram_bot/internal/bot/keyboards"
+	"telegram_bot/internal/modules/user"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
+func (h *Handler) checkDeveloperPermission(ctx context.Context, chatID int64, userID int64) bool {
+	u, err := h.userSvc.GetUserInfo(ctx, userID)
+	if err != nil || (u.Role != user.RoleDeveloper && u.Role != user.RoleAdmin) {
+		h.SendMessage(chatID, "⛔ У вас нет доступа к панели разработчика.", nil)
+		return false
+	}
+	return true
+}
+
 func (h *Handler) HandleDeveloperMenu(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
+
+	if !h.checkDeveloperPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
+
 	h.SendMessage(msg.Chat.ID, "👨‍💻 Панель разработчика", keyboards.DeveloperMenu)
 }
 
 func (h *Handler) HandleSelectCurator(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
+
+	if !h.checkDeveloperPermission(ctx, msg.Chat.ID, msg.From.ID) {
+		return
+	}
 
 	curators, err := h.userSvc.GetAllCurators(ctx)
 	if err != nil {
@@ -33,7 +48,7 @@ func (h *Handler) HandleSelectCurator(ctx context.Context, msg *tgbotapi.Message
 		return
 	}
 
-	var rows [][]tgbotapi.InlineKeyboardButton
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(curators))
 	for _, c := range curators {
 		btnText := fmt.Sprintf("%s %s", c.FirstName, c.LastName)
 		data := fmt.Sprintf("dev_attach:%d", c.ID)

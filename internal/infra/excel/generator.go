@@ -6,6 +6,7 @@ import (
 	"math"
 	"sort"
 	"strings"
+	"telegram_bot/internal/modules/report/worker"
 	"time"
 
 	"telegram_bot/internal/modules/report"
@@ -54,12 +55,23 @@ func (g *Generator) GenerateStatsReport(data []report.UserStat) ([]byte, error) 
 	return buf.Bytes(), nil
 }
 
-func (g *Generator) GenerateStrictSubmissionsReport(data *report.StrictReportData) ([]byte, error) {
-	f := excelize.NewFile()
-	defer f.Close()
+type StrictSubmissionsStream struct {
+	f                *excelize.File
+	sheet            string
+	currentRow       int
+	currentUser      string
+	userSubCount     int
+	taskCounts       map[string]int
+	mainTitleStyle   int
+	sectionStyle     int
+	userHeaderStyle  int
+	tableHeaderStyle int
+}
 
-	sheetHistory := "История сдач"
-	f.SetSheetName("Sheet1", sheetHistory)
+func (g *Generator) NewStrictSubmissionsStream() (worker.StrictReportStream, error) {
+	f := excelize.NewFile()
+	sheet := "История сдач"
+	f.SetSheetName("Sheet1", sheet)
 
 	mainTitleStyle, _ := f.NewStyle(&excelize.Style{
 		Font:      &excelize.Font{Bold: true, Color: "FFFFFF", Size: 14},
@@ -83,11 +95,63 @@ func (g *Generator) GenerateStrictSubmissionsReport(data *report.StrictReportDat
 		},
 	})
 
-	row := 1
+	return &StrictSubmissionsStream{
+		f:                f,
+		sheet:            sheet,
+		currentRow:       20,
+		taskCounts:       make(map[string]int),
+		mainTitleStyle:   mainTitleStyle,
+		sectionStyle:     sectionStyle,
+		userHeaderStyle:  userHeaderStyle,
+		tableHeaderStyle: tableHeaderStyle,
+	}, nil
+}
 
-	f.SetCellValue(sheetHistory, fmt.Sprintf("A%d", row), data.ReportTitle)
-	f.MergeCell(sheetHistory, fmt.Sprintf("A%d", row), fmt.Sprintf("H%d", row))
-	f.SetCellStyle(sheetHistory, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), mainTitleStyle)
+func (s *StrictSubmissionsStream) WriteRow(username, role string, detail report.SubmissionDetail) error {
+	if s.currentUser != username {
+		s.currentUser = username
+		s.userSubCount = 0
+
+		if s.currentRow > 20 {
+			s.currentRow++
+		}
+
+		s.f.SetCellValue(s.sheet, fmt.Sprintf("A%d", s.currentRow), fmt.Sprintf("Ученик: %s", username))
+		s.f.SetCellStyle(s.sheet, fmt.Sprintf("A%d", s.currentRow), fmt.Sprintf("H%d", s.currentRow), s.userHeaderStyle)
+		s.currentRow++
+
+		headers := []interface{}{"№", "Дата и время", "Тип работы", "Задание", "Файлов", "Комментарий", "Статус", "ID сдачи"}
+		s.f.SetSheetRow(s.sheet, fmt.Sprintf("A%d", s.currentRow), &headers)
+		s.f.SetRowStyle(s.sheet, s.currentRow, s.currentRow, s.tableHeaderStyle)
+		s.currentRow++
+	}
+
+	s.userSubCount++
+
+	nameLower := strings.ToLower(detail.TaskName)
+	if !strings.Contains(nameLower, "созвон") {
+		s.taskCounts[detail.TaskName]++
+	}
+
+	cleanType := strings.ReplaceAll(strings.ReplaceAll(detail.Type, "📚 ", ""), "📝 ", "")
+	cleanStatus := strings.ReplaceAll(strings.ReplaceAll(detail.Status, "⏳ ", ""), "✅ ", "")
+
+	rowData := []interface{}{
+		s.userSubCount, detail.DateTime, cleanType, detail.TaskName, detail.FilesCount, detail.Comment, cleanStatus, detail.SubmissionID,
+	}
+	s.f.SetSheetRow(s.sheet, fmt.Sprintf("A%d", s.currentRow), &rowData)
+	s.currentRow++
+
+	return nil
+}
+
+func (s *StrictSubmissionsStream) Finish(data *report.StrictReportData) ([]byte, error) {
+	defer s.f.Close()
+
+	row := 1
+	s.f.SetCellValue(s.sheet, fmt.Sprintf("A%d", row), data.ReportTitle)
+	s.f.MergeCell(s.sheet, fmt.Sprintf("A%d", row), fmt.Sprintf("H%d", row))
+	s.f.SetCellStyle(s.sheet, fmt.Sprintf("A%d", row), fmt.Sprintf("A%d", row), s.mainTitleStyle)
 	row++
 
 	meta := [][]interface{}{
@@ -97,13 +161,13 @@ func (g *Generator) GenerateStrictSubmissionsReport(data *report.StrictReportDat
 		{"Период:", data.Period},
 	}
 	for _, m := range meta {
-		f.SetSheetRow(sheetHistory, fmt.Sprintf("A%d", row), &m)
+		s.f.SetSheetRow(s.sheet, fmt.Sprintf("A%d", row), &m)
 		row++
 	}
 	row++
 
-	f.SetCellValue(sheetHistory, fmt.Sprintf("A%d", row), "ОБЩАЯ СТАТИСТИКА ЗА ПЕРИОД")
-	f.SetCellStyle(sheetHistory, fmt.Sprintf("A%d", row), fmt.Sprintf("H%d", row), sectionStyle)
+	s.f.SetCellValue(s.sheet, fmt.Sprintf("A%d", row), "ОБЩАЯ СТАТИСТИКА ЗА ПЕРИОД")
+	s.f.SetCellStyle(s.sheet, fmt.Sprintf("A%d", row), fmt.Sprintf("H%d", row), s.sectionStyle)
 	row++
 
 	stats := [][]interface{}{
@@ -112,66 +176,34 @@ func (g *Generator) GenerateStrictSubmissionsReport(data *report.StrictReportDat
 		{"Активных студентов:", data.ActiveStudents, "", "Сдач конспектов:", data.NotesSubmissions},
 		{"Среднее сдач на юзера:", fmt.Sprintf("%.1f", data.AvgSubmissions), "", "Распределение (ДЗ/Консп):", data.HWNotesRatio},
 	}
-	for _, s := range stats {
-		f.SetSheetRow(sheetHistory, fmt.Sprintf("A%d", row), &s)
-		row++
-	}
-	row += 2
-
-	f.SetCellValue(sheetHistory, fmt.Sprintf("A%d", row), "ДЕТАЛИЗАЦИЯ ПО УЧЕНИКАМ")
-	f.SetCellStyle(sheetHistory, fmt.Sprintf("A%d", row), fmt.Sprintf("H%d", row), sectionStyle)
-	row++
-
-	taskCounts := make(map[string]int)
-
-	for _, user := range data.Users {
-		f.SetCellValue(sheetHistory, fmt.Sprintf("A%d", row), fmt.Sprintf("%s (Сдач: %d)", user.Username, user.TotalCount))
-		f.SetCellStyle(sheetHistory, fmt.Sprintf("A%d", row), fmt.Sprintf("H%d", row), userHeaderStyle)
-		row++
-
-		headers := []interface{}{"№", "Дата и время", "Тип работы", "Задание", "Файлов", "Комментарий", "Статус", "ID сдачи"}
-		f.SetSheetRow(sheetHistory, fmt.Sprintf("A%d", row), &headers)
-		f.SetRowStyle(sheetHistory, row, row, tableHeaderStyle)
-		row++
-
-		for _, sub := range user.Submissions {
-			nameLower := strings.ToLower(sub.TaskName)
-			if !strings.Contains(nameLower, "созвон") {
-				taskCounts[sub.TaskName]++
-			}
-
-			cleanType := strings.ReplaceAll(strings.ReplaceAll(sub.Type, "📚 ", ""), "📝 ", "")
-			cleanStatus := strings.ReplaceAll(strings.ReplaceAll(sub.Status, "⏳ ", ""), "✅ ", "")
-
-			rowData := []interface{}{
-				sub.Number, sub.DateTime, cleanType, sub.TaskName, sub.FilesCount, sub.Comment, cleanStatus, sub.SubmissionID,
-			}
-			f.SetSheetRow(sheetHistory, fmt.Sprintf("A%d", row), &rowData)
-			row++
-		}
+	for _, st := range stats {
+		s.f.SetSheetRow(s.sheet, fmt.Sprintf("A%d", row), &st)
 		row++
 	}
 
-	f.SetColWidth(sheetHistory, "A", "B", 20)
-	f.SetColWidth(sheetHistory, "C", "C", 12)
-	f.SetColWidth(sheetHistory, "D", "D", 35)
-	f.SetColWidth(sheetHistory, "E", "E", 10)
-	f.SetColWidth(sheetHistory, "F", "F", 25)
-	f.SetColWidth(sheetHistory, "G", "H", 15)
+	s.f.SetCellValue(s.sheet, "A18", "ДЕТАЛИЗАЦИЯ ПО УЧЕНИКАМ")
+	s.f.SetCellStyle(s.sheet, "A18", "H18", s.sectionStyle)
+
+	s.f.SetColWidth(s.sheet, "A", "B", 20)
+	s.f.SetColWidth(s.sheet, "C", "C", 12)
+	s.f.SetColWidth(s.sheet, "D", "D", 35)
+	s.f.SetColWidth(s.sheet, "E", "E", 10)
+	s.f.SetColWidth(s.sheet, "F", "F", 25)
+	s.f.SetColWidth(s.sheet, "G", "H", 15)
 
 	sheetAnalytics := "Аналитика"
-	f.NewSheet(sheetAnalytics)
+	s.f.NewSheet(sheetAnalytics)
 
-	redAlertStyle, _ := f.NewStyle(&excelize.Style{
+	redAlertStyle, _ := s.f.NewStyle(&excelize.Style{
 		Fill: excelize.Fill{Type: "pattern", Color: []string{"#FFC7CE"}, Pattern: 1},
 		Font: &excelize.Font{Color: "#9C0006", Bold: true},
 	})
-	goodStyle, _ := f.NewStyle(&excelize.Style{
+	goodStyle, _ := s.f.NewStyle(&excelize.Style{
 		Font: &excelize.Font{Color: "#006100"},
 	})
 
-	f.SetSheetRow(sheetAnalytics, "A1", &[]interface{}{"Задание (без созвонов)", "Количество сдач", "Анализ сложности"})
-	f.SetRowStyle(sheetAnalytics, 1, 1, tableHeaderStyle)
+	s.f.SetSheetRow(sheetAnalytics, "A1", &[]interface{}{"Задание (без созвонов)", "Количество сдач", "Анализ сложности"})
+	s.f.SetRowStyle(sheetAnalytics, 1, 1, s.tableHeaderStyle)
 
 	type taskStat struct {
 		Name  string
@@ -179,7 +211,7 @@ func (g *Generator) GenerateStrictSubmissionsReport(data *report.StrictReportDat
 	}
 	var tasks []taskStat
 	sum := 0
-	for k, v := range taskCounts {
+	for k, v := range s.taskCounts {
 		tasks = append(tasks, taskStat{Name: k, Count: v})
 		sum += v
 	}
@@ -195,28 +227,27 @@ func (g *Generator) GenerateStrictSubmissionsReport(data *report.StrictReportDat
 		r := i + 2
 		analysis := "В норме"
 
-		f.SetCellValue(sheetAnalytics, fmt.Sprintf("A%d", r), t.Name)
-		f.SetCellValue(sheetAnalytics, fmt.Sprintf("B%d", r), t.Count)
+		s.f.SetCellValue(sheetAnalytics, fmt.Sprintf("A%d", r), t.Name)
+		s.f.SetCellValue(sheetAnalytics, fmt.Sprintf("B%d", r), t.Count)
 
 		if float64(t.Count) <= lowThreshold {
 			analysis = "СЛОЖНОЕ (мало сдач!)"
-			f.SetCellValue(sheetAnalytics, fmt.Sprintf("C%d", r), analysis)
-			f.SetCellStyle(sheetAnalytics, fmt.Sprintf("A%d", r), fmt.Sprintf("C%d", r), redAlertStyle)
+			s.f.SetCellValue(sheetAnalytics, fmt.Sprintf("C%d", r), analysis)
+			s.f.SetCellStyle(sheetAnalytics, fmt.Sprintf("A%d", r), fmt.Sprintf("C%d", r), redAlertStyle)
 		} else {
-			f.SetCellValue(sheetAnalytics, fmt.Sprintf("C%d", r), analysis)
-			f.SetCellStyle(sheetAnalytics, fmt.Sprintf("C%d", r), fmt.Sprintf("C%d", r), goodStyle)
+			s.f.SetCellValue(sheetAnalytics, fmt.Sprintf("C%d", r), analysis)
+			s.f.SetCellStyle(sheetAnalytics, fmt.Sprintf("C%d", r), fmt.Sprintf("C%d", r), goodStyle)
 		}
 	}
 
-	f.SetColWidth(sheetAnalytics, "A", "A", 40)
-	f.SetColWidth(sheetAnalytics, "B", "C", 20)
+	s.f.SetColWidth(sheetAnalytics, "A", "A", 40)
+	s.f.SetColWidth(sheetAnalytics, "B", "C", 20)
 
 	if len(tasks) > 0 {
 		endRow := len(tasks) + 1
-
 		varyColors := true
 
-		err := f.AddChart(sheetAnalytics, "E2", &excelize.Chart{
+		err := s.f.AddChart(sheetAnalytics, "E2", &excelize.Chart{
 			Type: excelize.Col,
 			Series: []excelize.ChartSeries{
 				{
@@ -244,9 +275,9 @@ func (g *Generator) GenerateStrictSubmissionsReport(data *report.StrictReportDat
 		}
 	}
 
-	f.SetActiveSheet(0)
+	s.f.SetActiveSheet(0)
 	var buf bytes.Buffer
-	if err := f.Write(&buf); err != nil {
+	if err := s.f.Write(&buf); err != nil {
 		return nil, err
 	}
 	return buf.Bytes(), nil

@@ -74,13 +74,13 @@ func (c *Client) GetPresignedURL(ctx context.Context, objectName string, lifetim
 	return request.URL, nil
 }
 
-func (c *Client) GetFileContent(fileID string) (io.ReadCloser, error) {
-	out, err := c.s3Client.GetObject(context.TODO(), &s3.GetObjectInput{
+func (c *Client) DownloadFile(ctx context.Context, objectName string) (io.ReadCloser, error) {
+	out, err := c.s3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
-		Key:    aws.String(fileID),
+		Key:    aws.String(objectName),
 	})
 	if err != nil {
-		return nil, fmt.Errorf("failed to download file: %w", err)
+		return nil, fmt.Errorf("failed to download file from S3: %w", err)
 	}
 	return out.Body, nil
 }
@@ -93,20 +93,11 @@ func (c *Client) DeleteFile(ctx context.Context, objectName string) error {
 	return err
 }
 
-func (c *Client) DownloadFile(ctx context.Context, objectName string) (io.ReadCloser, error) {
-	out, err := c.s3Client.GetObject(ctx, &s3.GetObjectInput{
-		Bucket: aws.String(c.bucket),
-		Key:    aws.String(objectName),
-	})
-	if err != nil {
-		return nil, fmt.Errorf("failed to download file from S3: %w", err)
-	}
-	return out.Body, nil
-}
-
 func (c *Client) MoveFile(ctx context.Context, oldKey, newKey string) error {
 	source := fmt.Sprintf("%s/%s", c.bucket, oldKey)
-	sourceEncoded := url.PathEscape(source)
+
+	u := &url.URL{Path: source}
+	sourceEncoded := u.String()
 
 	_, err := c.s3Client.CopyObject(ctx, &s3.CopyObjectInput{
 		Bucket:     aws.String(c.bucket),

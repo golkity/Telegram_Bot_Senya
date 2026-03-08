@@ -39,7 +39,7 @@ type Repository interface {
 	GetUsersStatsReport(ctx context.Context, courseID string) ([]report.UserStat, error)
 
 	GetSubmissionsReport(ctx context.Context) ([]report.SubmissionStat, error)
-	GetStrictSubmissionsReport(ctx context.Context) (*report.StrictReportData, error)
+	StreamStrictSubmissionsReport(ctx context.Context, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error)
 	GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error)
 	GetDailyAdminStatsText(ctx context.Context) (string, error)
 
@@ -123,7 +123,7 @@ func (r *repo) GetAll(ctx context.Context) ([]User, error) {
 	}
 	defer rows.Close()
 
-	var users []User
+	users := make([]User, 0, 50)
 	for rows.Next() {
 		var u User
 		if err := rows.Scan(
@@ -133,6 +133,9 @@ func (r *repo) GetAll(ctx context.Context) ([]User, error) {
 			return nil, err
 		}
 		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return users, nil
 }
@@ -175,7 +178,7 @@ func (r *repo) GetByRole(ctx context.Context, role Role) ([]User, error) {
 	}
 	defer rows.Close()
 
-	var users []User
+	users := make([]User, 0, 10)
 	for rows.Next() {
 		var u User
 		if err := rows.Scan(
@@ -185,6 +188,9 @@ func (r *repo) GetByRole(ctx context.Context, role Role) ([]User, error) {
 			return nil, err
 		}
 		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return users, nil
 }
@@ -195,7 +201,7 @@ func (r *repo) GetCuratorsByCourse(ctx context.Context, courseID string) ([]User
               ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications
        FROM users u
        JOIN user_roles ur ON u.user_id = ur.user_id
-       JOIN curator_courses cc ON u.user_id = cc.curator_id -- ВОТ ОН, СПАСИТЕЛЬНЫЙ JOIN
+       JOIN curator_courses cc ON u.user_id = cc.curator_id
        WHERE ur.role = 'curator' AND cc.course_id = $1
     `
 	rows, err := r.db.Pool.Query(ctx, q, courseID)
@@ -204,7 +210,7 @@ func (r *repo) GetCuratorsByCourse(ctx context.Context, courseID string) ([]User
 	}
 	defer rows.Close()
 
-	var users []User
+	users := make([]User, 0, 10)
 	for rows.Next() {
 		var u User
 		if err := rows.Scan(
@@ -214,6 +220,9 @@ func (r *repo) GetCuratorsByCourse(ctx context.Context, courseID string) ([]User
 			return nil, err
 		}
 		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return users, nil
 }
@@ -233,6 +242,9 @@ func (r *repo) GetAllCourses(ctx context.Context) ([]string, error) {
 			return nil, err
 		}
 		courses = append(courses, name)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return courses, nil
 }
@@ -273,7 +285,7 @@ func (r *repo) GetByCuratorID(ctx context.Context, curatorID int64) ([]User, err
 	}
 	defer rows.Close()
 
-	var users []User
+	users := make([]User, 0, 30)
 	for rows.Next() {
 		var u User
 		if err := rows.Scan(
@@ -283,6 +295,9 @@ func (r *repo) GetByCuratorID(ctx context.Context, curatorID int64) ([]User, err
 			return nil, err
 		}
 		users = append(users, u)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return users, nil
 }
@@ -320,30 +335,21 @@ func (r *repo) GetDailyStat(ctx context.Context, userID int64, date time.Time) (
 }
 
 func (r *repo) Delete(ctx context.Context, userID int64) error {
-	tx, err := r.db.Pool.Begin(ctx)
-	if err != nil {
-		return err
+	batch := &pgx.Batch{}
+	batch.Queue(`UPDATE user_roles SET curator_id = NULL WHERE curator_id = $1`, userID)
+	batch.Queue(`DELETE FROM user_roles WHERE user_id = $1`, userID)
+	batch.Queue(`UPDATE submissions SET curator_id = NULL WHERE curator_id = $1`, userID)
+	batch.Queue(`DELETE FROM users WHERE user_id = $1`, userID)
+
+	br := r.db.Pool.SendBatch(ctx, batch)
+	defer br.Close()
+
+	for i := 0; i < 4; i++ {
+		if _, err := br.Exec(); err != nil {
+			return fmt.Errorf("batch exec %d failed: %w", i, err)
+		}
 	}
-	defer tx.Rollback(ctx)
-
-	_, err = tx.Exec(ctx, `UPDATE user_roles SET curator_id = NULL WHERE curator_id = $1`, userID)
-	if err != nil {
-		return fmt.Errorf("failed to unlink students: %w", err)
-	}
-
-	_, err = tx.Exec(ctx, `DELETE FROM user_roles WHERE user_id = $1`, userID)
-	if err != nil {
-		return fmt.Errorf("failed to delete user role: %w", err)
-	}
-
-	_, _ = tx.Exec(ctx, `UPDATE submissions SET curator_id = NULL WHERE curator_id = $1`, userID)
-
-	_, err = tx.Exec(ctx, `DELETE FROM users WHERE user_id = $1`, userID)
-	if err != nil {
-		return fmt.Errorf("failed to delete user: %w", err)
-	}
-
-	return tx.Commit(ctx)
+	return nil
 }
 
 func (r *repo) TransferStudents(ctx context.Context, sourceCuratorID, targetCuratorID int64) error {
@@ -360,25 +366,29 @@ func (r *repo) GetStudentsByCurator(ctx context.Context, curatorID int64) ([]int
 	}
 	defer rows.Close()
 
-	var ids []int64
+	ids := make([]int64, 0, 30)
 	for rows.Next() {
 		var id int64
-		if err := rows.Scan(&id); err == nil {
-			ids = append(ids, id)
+		if err := rows.Scan(&id); err != nil {
+			return nil, err
 		}
+		ids = append(ids, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return ids, nil
 }
 
 func (r *repo) GetStudentsCountByCourse(ctx context.Context) (map[string]int, error) {
 	q := `
-		SELECT COALESCE(c.course_name, ur.course_id, 'Неизвестный курс'), COUNT(ur.user_id)
-		FROM user_roles ur
-		LEFT JOIN courses c ON ur.course_id = c.course_id
-		WHERE ur.role = 'student' AND ur.course_id IS NOT NULL
-		GROUP BY c.course_name, ur.course_id
-		ORDER BY COUNT(ur.user_id) DESC
-	`
+       SELECT COALESCE(c.course_name, ur.course_id, 'Неизвестный курс'), COUNT(ur.user_id)
+       FROM user_roles ur
+       LEFT JOIN courses c ON ur.course_id = c.course_id
+       WHERE ur.role = 'student' AND ur.course_id IS NOT NULL
+       GROUP BY c.course_name, ur.course_id
+       ORDER BY COUNT(ur.user_id) DESC
+    `
 
 	rows, err := r.db.Pool.Query(ctx, q)
 	if err != nil {
@@ -395,21 +405,23 @@ func (r *repo) GetStudentsCountByCourse(ctx context.Context) (map[string]int, er
 		}
 		stats[courseName] = count
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return stats, nil
 }
 
 func (r *repo) GetStudentsCountByCurator(ctx context.Context) (map[string]int, error) {
 	q := `
-		SELECT 
-			COALESCE(curator.first_name || ' ' || curator.last_name, 'Без имени (ID: ' || ur.curator_id || ')'),
-			COUNT(ur.user_id)
-		FROM user_roles ur
-		JOIN users curator ON ur.curator_id = curator.user_id
-		WHERE ur.role = 'student' AND ur.curator_id IS NOT NULL
-		GROUP BY curator.first_name, curator.last_name, ur.curator_id
-		ORDER BY COUNT(ur.user_id) DESC
-	`
+       SELECT 
+          COALESCE(curator.first_name || ' ' || curator.last_name, 'Без имени (ID: ' || ur.curator_id || ')'),
+          COUNT(ur.user_id)
+       FROM user_roles ur
+       JOIN users curator ON ur.curator_id = curator.user_id
+       WHERE ur.role = 'student' AND ur.curator_id IS NOT NULL
+       GROUP BY curator.first_name, curator.last_name, ur.curator_id
+       ORDER BY COUNT(ur.user_id) DESC
+    `
 
 	rows, err := r.db.Pool.Query(ctx, q)
 	if err != nil {
@@ -426,26 +438,28 @@ func (r *repo) GetStudentsCountByCurator(ctx context.Context) (map[string]int, e
 		}
 		stats[strings.TrimSpace(curatorName)] = count
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return stats, nil
 }
 
 func (r *repo) GetUsersStatsReport(ctx context.Context, courseID string) ([]report.UserStat, error) {
 	q := `
-		SELECT 
-			u.user_id, 
-			TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS name,
-			COALESCE(ur.role, 'student') AS role,
-			COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
-			COUNT(s.id) AS total_files,
-			u.registration_date
-		FROM users u
-		LEFT JOIN user_roles ur ON u.user_id = ur.user_id
-		LEFT JOIN submissions s ON u.user_id = s.user_id
-		WHERE ($1::text = '' OR ur.course_id = $1)
-		GROUP BY u.user_id, u.first_name, u.last_name, ur.role, u.registration_date
-		ORDER BY ur.role, u.registration_date DESC
-	`
+       SELECT 
+          u.user_id, 
+          TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS name,
+          COALESCE(ur.role, 'student') AS role,
+          COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
+          COUNT(s.id) AS total_files,
+          u.registration_date
+       FROM users u
+       LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+       LEFT JOIN submissions s ON u.user_id = s.user_id
+       WHERE ($1::text = '' OR ur.course_id = $1)
+       GROUP BY u.user_id, u.first_name, u.last_name, ur.role, u.registration_date
+       ORDER BY ur.role, u.registration_date DESC
+    `
 
 	rows, err := r.db.Pool.Query(ctx, q, courseID)
 	if err != nil {
@@ -453,7 +467,7 @@ func (r *repo) GetUsersStatsReport(ctx context.Context, courseID string) ([]repo
 	}
 	defer rows.Close()
 
-	var stats []report.UserStat
+	stats := make([]report.UserStat, 0, 100)
 	for rows.Next() {
 		var stat report.UserStat
 		var name string
@@ -466,34 +480,35 @@ func (r *repo) GetUsersStatsReport(ctx context.Context, courseID string) ([]repo
 			&stat.FilesCount,
 			&stat.RegisteredAt,
 		); err != nil {
-			continue
+			return nil, fmt.Errorf("scan error: %w", err)
 		}
 
 		if name == "" {
 			name = "Без имени"
 		}
 		stat.Name = name
-
 		stats = append(stats, stat)
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return stats, nil
 }
 
 func (r *repo) GetSubmissionsReport(ctx context.Context) ([]report.SubmissionStat, error) {
 	q := `
-		SELECT 
-			TO_CHAR(s.submission_date, 'YYYY-MM-DD HH24:MI') as date,
-			COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '') as student_name,
-			COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, 'Без куратора') as curator_name,
-			s.submission_type,
-			COALESCE(s.status, 'pending')
-		FROM submissions s
-		JOIN users u ON s.user_id = u.user_id
-		LEFT JOIN user_roles ur ON u.user_id = ur.user_id
-		LEFT JOIN users c ON ur.curator_id = c.user_id
-		ORDER BY s.submission_date DESC
-	`
+       SELECT 
+          TO_CHAR(s.submission_date, 'YYYY-MM-DD HH24:MI') as date,
+          COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '') as student_name,
+          COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, 'Без куратора') as curator_name,
+          s.submission_type,
+          COALESCE(s.status, 'pending')
+       FROM submissions s
+       JOIN users u ON s.user_id = u.user_id
+       LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+       LEFT JOIN users c ON ur.curator_id = c.user_id
+       ORDER BY s.submission_date DESC
+    `
 
 	rows, err := r.db.Pool.Query(ctx, q)
 	if err != nil {
@@ -501,51 +516,58 @@ func (r *repo) GetSubmissionsReport(ctx context.Context) ([]report.SubmissionSta
 	}
 	defer rows.Close()
 
-	var stats []report.SubmissionStat
+	stats := make([]report.SubmissionStat, 0, 100)
 	for rows.Next() {
 		var stat report.SubmissionStat
 		if err := rows.Scan(
 			&stat.Date, &stat.StudentName, &stat.CuratorName,
 			&stat.Type, &stat.Status,
-		); err == nil {
-			if stat.Type == "homework" {
-				stat.Type = "ДЗ"
-			} else if stat.Type == "notes" {
-				stat.Type = "Конспект"
-			}
-			stats = append(stats, stat)
+		); err != nil {
+			return nil, fmt.Errorf("scan error: %w", err)
 		}
+		if stat.Type == "homework" {
+			stat.Type = "ДЗ"
+		} else if stat.Type == "notes" {
+			stat.Type = "Конспект"
+		}
+		stats = append(stats, stat)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return stats, nil
 }
 
-func (r *repo) GetStrictSubmissionsReport(ctx context.Context) (*report.StrictReportData, error) {
+func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error) {
 	var totalUsers, courseStudents, courseDevs int
-	_ = r.db.Pool.QueryRow(ctx, `
-		SELECT 
-			COUNT(*),
-			COUNT(*) FILTER (WHERE role = 'student'),
-			COUNT(*) FILTER (WHERE role = 'developer')
-		FROM user_roles
-	`).Scan(&totalUsers, &courseStudents, &courseDevs)
+	err := r.db.Pool.QueryRow(ctx, `
+       SELECT 
+          COUNT(*),
+          COUNT(*) FILTER (WHERE role = 'student'),
+          COUNT(*) FILTER (WHERE role = 'developer')
+       FROM user_roles
+    `).Scan(&totalUsers, &courseStudents, &courseDevs)
+	if err != nil {
+		return nil, fmt.Errorf("failed to get global counts: %w", err)
+	}
 
 	q := `
-		SELECT 
-			COALESCE(u.username, u.first_name, 'Без имени') AS username,
-			COALESCE(ur.role, 'student') AS role,
-			s.id AS sub_id,
-			TO_CHAR(s.submission_date, 'YYYY-MM-DD HH24:MI:SS') AS sub_date,
-			s.submission_type,
-			COALESCE(s.status, 'pending') AS status,
-			COALESCE(sm.subtask_name, s.task_number, 'Не указано') AS task_name,
-			COALESCE(cardinality(s.file_paths), 0) AS files_count,
-			COALESCE(s.comment, '—') AS comment
-		FROM submissions s
-		JOIN users u ON s.user_id = u.user_id
-		LEFT JOIN user_roles ur ON u.user_id = ur.user_id
-		LEFT JOIN subtask_mappings sm ON s.task_number = sm.subtask_code
-		ORDER BY username, s.submission_date DESC
-	`
+       SELECT 
+          COALESCE(u.username, u.first_name, 'Без имени') AS username,
+          COALESCE(ur.role, 'student') AS role,
+          s.id AS sub_id,
+          TO_CHAR(s.submission_date, 'YYYY-MM-DD HH24:MI:SS') AS sub_date,
+          s.submission_type,
+          COALESCE(s.status, 'pending') AS status,
+          COALESCE(sm.subtask_name, s.task_number, 'Не указано') AS task_name,
+          COALESCE(cardinality(s.file_paths), 0) AS files_count,
+          COALESCE(s.comment, '—') AS comment
+       FROM submissions s
+       JOIN users u ON s.user_id = u.user_id
+       LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+       LEFT JOIN subtask_mappings sm ON s.task_number = sm.subtask_code
+       ORDER BY username, s.submission_date DESC
+    `
 
 	rows, err := r.db.Pool.Query(ctx, q)
 	if err != nil {
@@ -566,9 +588,6 @@ func (r *repo) GetStrictSubmissionsReport(ctx context.Context) (*report.StrictRe
 		CourseDevs:     courseDevs,
 	}
 
-	userMap := make(map[string]*report.UserSubmissionsData)
-	var usernames []string
-
 	activeStudentsMap := make(map[string]bool)
 	activeDevsMap := make(map[string]bool)
 
@@ -578,7 +597,7 @@ func (r *repo) GetStrictSubmissionsReport(ctx context.Context) (*report.StrictRe
 		var filesCount int
 
 		if err := rows.Scan(&username, &role, &subID, &subDate, &subType, &status, &taskName, &filesCount, &comment); err != nil {
-			continue
+			return nil, fmt.Errorf("scan error in report: %w", err)
 		}
 
 		data.TotalSubmissions++
@@ -602,13 +621,6 @@ func (r *repo) GetStrictSubmissionsReport(ctx context.Context) (*report.StrictRe
 			status = "✅ Проверено"
 		}
 
-		userData, exists := userMap[username]
-		if !exists {
-			userData = &report.UserSubmissionsData{Username: username}
-			userMap[username] = userData
-			usernames = append(usernames, username)
-		}
-
 		detail := report.SubmissionDetail{
 			DateTime:     subDate,
 			Type:         subType,
@@ -619,8 +631,13 @@ func (r *repo) GetStrictSubmissionsReport(ctx context.Context) (*report.StrictRe
 			SubmissionID: subID,
 		}
 
-		userData.Submissions = append(userData.Submissions, detail)
-		userData.TotalCount++
+		if err := rowCallback(username, role, detail); err != nil {
+			return nil, fmt.Errorf("callback stopped execution: %w", err)
+		}
+	}
+
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("rows iteration error: %w", err)
 	}
 
 	data.ActiveStudents = len(activeStudentsMap)
@@ -641,30 +658,22 @@ func (r *repo) GetStrictSubmissionsReport(ctx context.Context) (*report.StrictRe
 		data.HWNotesRatio = "0.0% / 0.0%"
 	}
 
-	for _, uname := range usernames {
-		uData := userMap[uname]
-		for i := range uData.Submissions {
-			uData.Submissions[i].Number = i + 1
-		}
-		data.Users = append(data.Users, *uData)
-	}
-
 	return data, nil
 }
 
 func (r *repo) GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error) {
 	q := `
-		SELECT 
-			TO_CHAR(wr.created_at, 'YYYY-MM-DD HH24:MI') AS date,
-			COALESCE(u.username, u.first_name, 'Без имени') AS student_name,
-			COALESCE(c.first_name, 'Без куратора') AS curator_name,
-			wr.report_text
-		FROM weekly_reports wr
-		JOIN users u ON wr.user_id = u.user_id
-		LEFT JOIN user_roles ur ON u.user_id = ur.user_id
-		LEFT JOIN users c ON ur.curator_id = c.user_id
-		ORDER BY wr.created_at DESC
-	`
+       SELECT 
+          TO_CHAR(wr.created_at, 'YYYY-MM-DD HH24:MI') AS date,
+          COALESCE(u.username, u.first_name, 'Без имени') AS student_name,
+          COALESCE(c.first_name, 'Без куратора') AS curator_name,
+          wr.report_text
+       FROM weekly_reports wr
+       JOIN users u ON wr.user_id = u.user_id
+       LEFT JOIN user_roles ur ON u.user_id = ur.user_id
+       LEFT JOIN users c ON ur.curator_id = c.user_id
+       ORDER BY wr.created_at DESC
+    `
 
 	rows, err := r.db.Pool.Query(ctx, q)
 	if err != nil {
@@ -672,12 +681,16 @@ func (r *repo) GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyRepor
 	}
 	defer rows.Close()
 
-	var reports []report.WeeklyReportData
+	reports := make([]report.WeeklyReportData, 0, 50)
 	for rows.Next() {
 		var rep report.WeeklyReportData
-		if err := rows.Scan(&rep.Date, &rep.StudentName, &rep.CuratorName, &rep.Text); err == nil {
-			reports = append(reports, rep)
+		if err := rows.Scan(&rep.Date, &rep.StudentName, &rep.CuratorName, &rep.Text); err != nil {
+			return nil, fmt.Errorf("scan error: %w", err)
 		}
+		reports = append(reports, rep)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return reports, nil
 }
@@ -712,22 +725,22 @@ func (r *repo) GetDailyAdminStatsText(ctx context.Context) (string, error) {
 
 func (r *repo) GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error) {
 	q := `
-		SELECT 
-			COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, 'Без куратора') AS curator_name,
-			COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, 'Без имени') AS student_name,
-			COALESCE(u.username, '—') AS username,
-			COALESCE(cr.course_name, 'Без курса') AS course_name,
-			COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
-			COUNT(s.id) FILTER (WHERE s.submission_type = 'notes') AS notes_count,
-			TO_CHAR(u.registration_date, 'YYYY-MM-DD') AS reg_date
-		FROM users u
-		JOIN user_roles ur ON u.user_id = ur.user_id AND ur.role = 'student'
-		LEFT JOIN users c ON ur.curator_id = c.user_id
-		LEFT JOIN courses cr ON ur.course_id = cr.course_id
-		LEFT JOIN submissions s ON u.user_id = s.user_id
-		GROUP BY curator_name, student_name, u.username, cr.course_name, u.registration_date
-		ORDER BY curator_name, student_name
-	`
+       SELECT 
+          COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, 'Без куратора') AS curator_name,
+          COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, 'Без имени') AS student_name,
+          COALESCE(u.username, '—') AS username,
+          COALESCE(cr.course_name, 'Без курса') AS course_name,
+          COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
+          COUNT(s.id) FILTER (WHERE s.submission_type = 'notes') AS notes_count,
+          TO_CHAR(u.registration_date, 'YYYY-MM-DD') AS reg_date
+       FROM users u
+       JOIN user_roles ur ON u.user_id = ur.user_id AND ur.role = 'student'
+       LEFT JOIN users c ON ur.curator_id = c.user_id
+       LEFT JOIN courses cr ON ur.course_id = cr.course_id
+       LEFT JOIN submissions s ON u.user_id = s.user_id
+       GROUP BY curator_name, student_name, u.username, cr.course_name, u.registration_date
+       ORDER BY curator_name, student_name
+    `
 
 	rows, err := r.db.Pool.Query(ctx, q)
 	if err != nil {
@@ -735,32 +748,36 @@ func (r *repo) GetStudentSheetsReport(ctx context.Context) ([]report.StudentShee
 	}
 	defer rows.Close()
 
-	var records []report.StudentSheetRecord
+	records := make([]report.StudentSheetRecord, 0, 100)
 	for rows.Next() {
 		var rec report.StudentSheetRecord
-		if err := rows.Scan(&rec.CuratorName, &rec.StudentName, &rec.Username, &rec.CourseName, &rec.HWCount, &rec.NotesCount, &rec.RegisteredAt); err == nil {
-			records = append(records, rec)
+		if err := rows.Scan(&rec.CuratorName, &rec.StudentName, &rec.Username, &rec.CourseName, &rec.HWCount, &rec.NotesCount, &rec.RegisteredAt); err != nil {
+			return nil, fmt.Errorf("scan error: %w", err)
 		}
+		records = append(records, rec)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, err
 	}
 	return records, nil
 }
 
 func (r *repo) GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]report.UserStat, error) {
 	q := `
-		SELECT 
-			u.user_id, 
-			TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS name,
-			COALESCE(ur.role, 'student') AS role,
-			COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
-			COUNT(s.id) AS total_files,
-			u.registration_date
-		FROM users u
-		JOIN user_roles ur ON u.user_id = ur.user_id
-		LEFT JOIN submissions s ON u.user_id = s.user_id
-		WHERE ur.curator_id = $1
-		GROUP BY u.user_id, u.first_name, u.last_name, ur.role, u.registration_date
-		ORDER BY u.registration_date DESC
-	`
+       SELECT 
+          u.user_id, 
+          TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS name,
+          COALESCE(ur.role, 'student') AS role,
+          COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
+          COUNT(s.id) AS total_files,
+          u.registration_date
+       FROM users u
+       JOIN user_roles ur ON u.user_id = ur.user_id
+       LEFT JOIN submissions s ON u.user_id = s.user_id
+       WHERE ur.curator_id = $1
+       GROUP BY u.user_id, u.first_name, u.last_name, ur.role, u.registration_date
+       ORDER BY u.registration_date DESC
+    `
 
 	rows, err := r.db.Pool.Query(ctx, q, curatorID)
 	if err != nil {
@@ -768,7 +785,7 @@ func (r *repo) GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]re
 	}
 	defer rows.Close()
 
-	var stats []report.UserStat
+	stats := make([]report.UserStat, 0, 30)
 	for rows.Next() {
 		var stat report.UserStat
 		var name string
@@ -781,16 +798,17 @@ func (r *repo) GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]re
 			&stat.FilesCount,
 			&stat.RegisteredAt,
 		); err != nil {
-			continue
+			return nil, fmt.Errorf("scan error: %w", err)
 		}
 
 		if name == "" {
 			name = "Без имени"
 		}
 		stat.Name = name
-
 		stats = append(stats, stat)
 	}
-
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
 	return stats, nil
 }

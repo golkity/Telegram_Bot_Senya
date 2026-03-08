@@ -50,19 +50,17 @@ func (s *Service) GetText(ctx context.Context, key string, defaultVal string) st
 	}
 
 	dbVal, err := s.repo.GetByKey(ctx, key)
-	if err == nil && dbVal != "" {
+	if err == nil {
 		s.mu.Lock()
 		s.cache[key] = dbVal
 		s.mu.Unlock()
 		return dbVal
 	}
 
-	if err != nil {
-		_ = s.repo.Update(ctx, key, defaultVal)
-		s.mu.Lock()
-		s.cache[key] = defaultVal
-		s.mu.Unlock()
-	}
+	_ = s.repo.Update(ctx, key, defaultVal)
+	s.mu.Lock()
+	s.cache[key] = defaultVal
+	s.mu.Unlock()
 
 	return defaultVal
 }

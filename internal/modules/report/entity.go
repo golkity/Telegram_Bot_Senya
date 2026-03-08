@@ -26,14 +26,13 @@ type SubmissionStat struct {
 }
 
 type StrictReportData struct {
-	ReportTitle    string
-	GenerationDate string
-	CourseName     string
-	CuratorName    string
-	Period         string
-	WeekType       string
-	CourseFilter   string
-
+	ReportTitle      string
+	GenerationDate   string
+	CourseName       string
+	CuratorName      string
+	Period           string
+	WeekType         string
+	CourseFilter     string
 	TotalUsers       int
 	CourseStudents   int
 	CourseDevs       int
@@ -46,8 +45,6 @@ type StrictReportData struct {
 	ReportTypeStat   string
 	AvgSubmissions   float64
 	HWNotesRatio     string
-
-	Users []UserSubmissionsData
 }
 
 type UserSubmissionsData struct {
