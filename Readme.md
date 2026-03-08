@@ -342,7 +342,7 @@ bucket_name/
 docker exec -i telegram_bot_senya-postgres-1 psql -U postgres -d telegram_bot -c "
 UPDATE user_roles
 SET role = 'admin'
-WHERE user_id =8548162447;
+WHERE user_id =1575777629;
 "
 ```
 
