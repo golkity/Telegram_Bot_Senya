@@ -12,9 +12,7 @@ import (
 )
 
 func (h *Handler) HandleStudentJoinCourse(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 
 	text := msg.Text
 	courseName := strings.TrimPrefix(text, "📚 ")
@@ -40,9 +38,7 @@ func (h *Handler) HandleStudentJoinCourse(ctx context.Context, msg *tgbotapi.Mes
 }
 
 func (h *Handler) HandleGetArchive(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 
 	waitMsgConfig := tgbotapi.NewMessage(msg.Chat.ID, "📦 Запрос принят. Начинаю сборку архива всех ваших файлов...\nЭто может занять несколько минут.")
 	waitMsg, _ := h.bot.Send(waitMsgConfig)
@@ -55,7 +51,7 @@ func (h *Handler) HandleGetArchive(ctx context.Context, msg *tgbotapi.Message) {
 
 		if waitMsg.MessageID != 0 {
 			go func() {
-				h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
+				h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, waitMsg.MessageID))
 			}()
 		}
 
@@ -74,9 +70,7 @@ func (h *Handler) HandleGetArchive(ctx context.Context, msg *tgbotapi.Message) {
 }
 
 func (h *Handler) HandleDailyStatistics(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 
 	stats, err := h.userSvc.GetDailyStats(ctx, msg.From.ID)
 	if err != nil {
@@ -99,9 +93,7 @@ func (h *Handler) HandleDailyStatistics(ctx context.Context, msg *tgbotapi.Messa
 }
 
 func (h *Handler) HandleWeeklyReportSubmission(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 
 	if !h.reportSvc.IsReportDay(time.Now().Weekday()) {
 		h.SendMessage(msg.Chat.ID, "❌ Еженедельные отчеты принимаются только в Воскресенье и Понедельник.", keyboards.StudentMenu)
@@ -120,9 +112,7 @@ func (h *Handler) HandleWeeklyReportSubmission(ctx context.Context, msg *tgbotap
 }
 
 func (h *Handler) HandleStudentJoinCurator(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 
 	text := msg.Text
 	curatorName := strings.TrimPrefix(text, "👤 ")

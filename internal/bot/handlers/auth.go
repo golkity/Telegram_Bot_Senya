@@ -24,11 +24,7 @@ func (h *Handler) HandleStart(ctx context.Context, msg *tgbotapi.Message) {
 	}
 	lastStartCall.Store(userID, time.Now())
 
-	if msg.MessageID != 0 {
-		go func() {
-			h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-		}()
-	}
+	h.deleteUserMessage(msg)
 
 	u := user.User{
 		ID:        msg.From.ID,
@@ -107,11 +103,7 @@ func (h *Handler) handleDeveloperWelcome(_ context.Context, chatID int64, u *use
 }
 
 func (h *Handler) HandleCourseSelection(ctx context.Context, msg *tgbotapi.Message) {
-	if msg.MessageID != 0 {
-		go func() {
-			h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-		}()
-	}
+	h.deleteUserMessage(msg)
 
 	courses, err := h.userSvc.GetAllCourses(ctx)
 	if err != nil {
@@ -119,7 +111,7 @@ func (h *Handler) HandleCourseSelection(ctx context.Context, msg *tgbotapi.Messa
 		return
 	}
 
-	var rows [][]tgbotapi.KeyboardButton
+	rows := make([][]tgbotapi.KeyboardButton, 0, len(courses))
 	for _, courseName := range courses {
 		btnText := fmt.Sprintf("📚 %s", courseName)
 		rows = append(rows, tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnText)))
@@ -133,11 +125,7 @@ func (h *Handler) HandleCourseSelection(ctx context.Context, msg *tgbotapi.Messa
 }
 
 func (h *Handler) HandleCuratorSelectionForStudent(ctx context.Context, msg *tgbotapi.Message) {
-	if msg.MessageID != 0 {
-		go func() {
-			h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-		}()
-	}
+	h.deleteUserMessage(msg)
 
 	u, err := h.userSvc.GetUserInfo(ctx, msg.From.ID)
 	if err != nil || u == nil || u.CourseID == nil {
@@ -153,7 +141,7 @@ func (h *Handler) HandleCuratorSelectionForStudent(ctx context.Context, msg *tgb
 		return
 	}
 
-	var rows [][]tgbotapi.KeyboardButton
+	rows := make([][]tgbotapi.KeyboardButton, 0, len(curators))
 	for _, c := range curators {
 		btnText := fmt.Sprintf("👤 %s", c.FirstName)
 		rows = append(rows, tgbotapi.NewKeyboardButtonRow(tgbotapi.NewKeyboardButton(btnText)))

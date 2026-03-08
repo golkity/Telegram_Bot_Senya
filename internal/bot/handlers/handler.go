@@ -22,10 +22,9 @@ type Handler struct {
 	reportSvc     *report.Service
 	cmsSvc        *cms.Service
 
-	state StateContext
-	bot   *tgbotapi.BotAPI
-	log   *slog.Logger
-
+	state   StateContext
+	bot     *tgbotapi.BotAPI
+	log     *slog.Logger
 	wordGen *word.Generator
 
 	lastBotMessages sync.Map
@@ -70,7 +69,7 @@ func (h *Handler) SendCleanMessage(chatID int64, text string, kb interface{}) {
 		go func() {
 			_, err := h.bot.Request(tgbotapi.NewDeleteMessage(chatID, oldMsgID))
 			if err != nil {
-				h.log.Debug("could not delete previous bot message (maybe deleted by user)", "err", err)
+				h.log.Debug("could not delete previous bot message", "err", err)
 			}
 		}()
 	}
@@ -125,7 +124,7 @@ func (h *Handler) SendFile(chatID int64, fileData interface{}, fileName string, 
 		doc.Caption = caption
 		fileRequest = doc
 	case []byte:
-		if len(data) == 0 {
+		if data == nil || len(data) == 0 {
 			if caption != "" {
 				h.SendMessage(chatID, caption, nil)
 			}
@@ -187,9 +186,7 @@ func (h *Handler) HandleGenericText(ctx context.Context, msg *tgbotapi.Message) 
 	case StateWaitingForDeleteInput:
 		h.HandleDeleteUserInput(ctx, msg)
 	case StateWaitingForInputUserStats:
-		go func() {
-			h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-		}()
+		h.deleteUserMessage(msg)
 		h.SendCleanMessage(msg.Chat.ID, "Поиск по тексту пока не реализован, используйте меню.", nil)
 	case StateWaitingForTransferSource:
 		h.HandleTransferSourceInput(ctx, msg)
@@ -200,9 +197,7 @@ func (h *Handler) HandleGenericText(ctx context.Context, msg *tgbotapi.Message) 
 		StateCMSWaitingMessages, StateCMSWaitingReportTime, StateCMSWaitingReminderTime,
 		StateCMSWaitingCheckTime, StateCMSWaitingCuratorReportTime, StateCMSWaitingWeeklyDays:
 
-		go func() {
-			h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-		}()
+		h.deleteUserMessage(msg)
 
 		keyToUpdate := ""
 		switch state {
@@ -244,9 +239,7 @@ func (h *Handler) HandleGenericText(ctx context.Context, msg *tgbotapi.Message) 
 }
 
 func (h *Handler) HandleWeeklyReportText(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 	reportText := msg.Text
 	h.log.Info("received weekly report", "user_id", msg.From.ID, "text", reportText)
 
@@ -255,9 +248,7 @@ func (h *Handler) HandleWeeklyReportText(ctx context.Context, msg *tgbotapi.Mess
 }
 
 func (h *Handler) HandleCourseCreationFlow(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 	courseName := msg.Text
 	h.log.Info("creating new course", "name", courseName)
 
@@ -266,9 +257,7 @@ func (h *Handler) HandleCourseCreationFlow(ctx context.Context, msg *tgbotapi.Me
 }
 
 func (h *Handler) HandleCuratorSendReminderText(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 	reminderText := msg.Text
 	curatorID := msg.From.ID
 
@@ -284,9 +273,7 @@ func (h *Handler) HandleCuratorSendReminderText(ctx context.Context, msg *tgbota
 }
 
 func (h *Handler) HandleCustomizationText(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 	settingValue := msg.Text
 	state := h.state.GetState(msg.From.ID)
 
@@ -297,8 +284,6 @@ func (h *Handler) HandleCustomizationText(ctx context.Context, msg *tgbotapi.Mes
 }
 
 func (h *Handler) HandleUnknown(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 	h.SendCleanMessage(msg.Chat.ID, "Я не понимаю это сообщение. Пожалуйста, используйте меню.", nil)
 }

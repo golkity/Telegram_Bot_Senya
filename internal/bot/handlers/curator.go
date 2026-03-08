@@ -12,16 +12,12 @@ import (
 )
 
 func (h *Handler) HandleCuratorMenu(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 	h.SendMessage(msg.Chat.ID, "👨‍🏫 Панель куратора. Выберите действие:", keyboards.CuratorMenu)
 }
 
 func (h *Handler) HandleCuratorMyStudents(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 
 	students, err := h.userSvc.GetStudentsByCurator(ctx, msg.From.ID)
 	if err != nil {
@@ -36,6 +32,7 @@ func (h *Handler) HandleCuratorMyStudents(ctx context.Context, msg *tgbotapi.Mes
 	}
 
 	var sb strings.Builder
+	sb.Grow(len(students) * 60)
 	sb.WriteString(fmt.Sprintf("📋 Ваши студенты (%d):\n\n", len(students)))
 
 	for i, s := range students {
@@ -63,17 +60,13 @@ func (h *Handler) HandleCuratorMyStudents(ctx context.Context, msg *tgbotapi.Mes
 }
 
 func (h *Handler) HandleCuratorReminder(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 	h.state.SetState(msg.From.ID, StateWaitingForReminderText)
 	h.SendMessage(msg.Chat.ID, "📝 Введите текст напоминания для всех ваших студентов:", keyboards.CancelButton)
 }
 
 func (h *Handler) HandleCuratorDailyReport(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 	h.SendMessage(msg.Chat.ID, "📊 Генерирую ежедневный отчет по вашим студентам...", nil)
 
 	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "curator_daily")
@@ -84,9 +77,7 @@ func (h *Handler) HandleCuratorDailyReport(ctx context.Context, msg *tgbotapi.Me
 }
 
 func (h *Handler) HandleCuratorWeeklyReport(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 	h.SendMessage(msg.Chat.ID, "📈 Генерирую еженедельный отчет...", nil)
 
 	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "curator_weekly")
@@ -97,9 +88,7 @@ func (h *Handler) HandleCuratorWeeklyReport(ctx context.Context, msg *tgbotapi.M
 }
 
 func (h *Handler) HandleWordReport(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 	h.SendMessage(msg.Chat.ID, "⏳ Генерирую Word-отчет (еженедельный)...", nil)
 
 	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "word_weekly")
@@ -110,9 +99,7 @@ func (h *Handler) HandleWordReport(ctx context.Context, msg *tgbotapi.Message) {
 }
 
 func (h *Handler) HandleSubmissionReportExcel(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 	h.SendMessage(msg.Chat.ID, "⏳ Генерирую детальный Excel по сдачам...", nil)
 
 	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "excel_submissions")
@@ -123,9 +110,7 @@ func (h *Handler) HandleSubmissionReportExcel(ctx context.Context, msg *tgbotapi
 }
 
 func (h *Handler) HandleSummaryExcel(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 	h.SendMessage(msg.Chat.ID, "⏳ Генерирую сводную таблицу Excel...", nil)
 
 	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "excel_summary")
@@ -136,9 +121,7 @@ func (h *Handler) HandleSummaryExcel(ctx context.Context, msg *tgbotapi.Message)
 }
 
 func (h *Handler) HandleViewStudentWorks(ctx context.Context, msg *tgbotapi.Message) {
-	go func() {
-		h.bot.Request(tgbotapi.NewDeleteMessage(msg.Chat.ID, msg.MessageID))
-	}()
+	h.deleteUserMessage(msg)
 
 	students, err := h.userSvc.GetStudentsByCurator(ctx, msg.From.ID)
 	if err != nil {
@@ -151,7 +134,7 @@ func (h *Handler) HandleViewStudentWorks(ctx context.Context, msg *tgbotapi.Mess
 		return
 	}
 
-	var rows [][]tgbotapi.InlineKeyboardButton
+	rows := make([][]tgbotapi.InlineKeyboardButton, 0, len(students))
 	for _, s := range students {
 		name := s.FirstName
 		if s.LastName != "" {
