@@ -8,20 +8,26 @@ import (
 	"time"
 )
 
+type StrictReportStream interface {
+	WriteRow(username, role string, detail report.SubmissionDetail) error
+	Finish(headerData *report.StrictReportData) ([]byte, error)
+}
+
 type ReportGenerator interface {
 	GenerateStatsReport(data []report.UserStat) ([]byte, error)
-	GenerateStrictSubmissionsReport(data *report.StrictReportData) ([]byte, error)
+	NewStrictSubmissionsStream() (StrictReportStream, error)
 	GenerateWeeklyReportsExcel(data []report.WeeklyReportData) ([]byte, error)
 	GenerateStudentSheetsExcel(data []report.StudentSheetRecord) ([]byte, error)
 }
 
 type DataProvider interface {
 	GetStats(ctx context.Context, courseID string) ([]report.UserStat, error)
-	GetStrictSubmissionsReport(ctx context.Context) (*report.StrictReportData, error)
+	StreamStrictSubmissionsReport(ctx context.Context, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error)
 	GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]report.UserStat, error)
 	GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error)
 	GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error)
 }
+
 type FileSender interface {
 	SendFile(chatID int64, fileData []byte, fileName string, caption string) error
 }
@@ -53,13 +59,21 @@ func ProcessReportJob(
 		fileName = fmt.Sprintf("users_report_%s.xlsx", time.Now().Format("2006-01-02_15-04"))
 
 	case "excel_submissions":
-		data, errGet := provider.GetStrictSubmissionsReport(ctx)
+		stream, errGen := gen.NewStrictSubmissionsStream()
+		if errGen != nil {
+			log.Error("failed to init strict submissions stream", "error", errGen)
+			_ = sender.SendFile(task.AdminChatID, nil, "", "❌ Ошибка инициализации генератора :(")
+			return
+		}
+
+		headerData, errGet := provider.StreamStrictSubmissionsReport(ctx, stream.WriteRow)
 		if errGet != nil {
-			log.Error("failed to fetch strict submissions", "error", errGet)
+			log.Error("failed to stream strict submissions", "error", errGet)
 			_ = sender.SendFile(task.AdminChatID, nil, "", "❌ Ошибка сбора данных о сдачах :(")
 			return
 		}
-		fileBytes, err = gen.GenerateStrictSubmissionsReport(data)
+
+		fileBytes, err = stream.Finish(headerData)
 		fileName = fmt.Sprintf("submissions_%s.xlsx", time.Now().Format("2006-01-02_15-04"))
 
 	case "admin_weekly":
