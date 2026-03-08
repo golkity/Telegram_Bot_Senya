@@ -115,13 +115,28 @@ func (s *Service) BroadcastToStudents(ctx context.Context, curatorID int64, text
 		return err
 	}
 
-	for _, student := range students {
-		if s.notifier != nil {
-			if err := s.notifier.Notify(student.ID, text); err != nil {
-				s.log.Warn("failed to notify student", "id", student.ID, "error", err)
-			}
-		}
+	if len(students) == 0 {
+		return nil
 	}
+
+	go func(studentList []User) {
+		s.log.Info("starting background broadcast", "curator_id", curatorID, "students_count", len(studentList))
+
+		successCount := 0
+		for _, student := range studentList {
+			if s.notifier != nil {
+				if err := s.notifier.Notify(student.ID, text); err != nil {
+					s.log.Warn("failed to notify student", "id", student.ID, "error", err)
+				} else {
+					successCount++
+				}
+			}
+			time.Sleep(50 * time.Millisecond)
+		}
+
+		s.log.Info("background broadcast finished", "curator_id", curatorID, "successful_sends", successCount)
+	}(students)
+
 	return nil
 }
 
@@ -131,17 +146,27 @@ func (s *Service) SendGlobalReminders(ctx context.Context) error {
 		return err
 	}
 
-	for _, u := range users {
-		if u.Role != RoleStudent {
-			continue
-		}
-		stat, err := s.repo.GetDailyStat(ctx, u.ID, time.Now())
-		if err == nil && stat.TotalFilesToday == 0 {
-			if s.notifier != nil {
-				_ = s.notifier.Notify(u.ID, "🔔 Не забудьте сдать работы сегодня!")
+	go func(userList []User) {
+		s.log.Info("starting global reminders broadcast")
+		sent := 0
+
+		for _, u := range userList {
+			if u.Role != RoleStudent {
+				continue
+			}
+			stat, err := s.repo.GetDailyStat(context.Background(), u.ID, time.Now())
+			if err == nil && stat.TotalFilesToday == 0 {
+				if s.notifier != nil {
+					if err := s.notifier.Notify(u.ID, "🔔 Не забудьте сдать работы сегодня!"); err == nil {
+						sent++
+					}
+				}
+				time.Sleep(50 * time.Millisecond)
 			}
 		}
-	}
+		s.log.Info("global reminders finished", "sent_count", sent)
+	}(users)
+
 	return nil
 }
 
