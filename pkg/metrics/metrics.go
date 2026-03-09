@@ -42,4 +42,15 @@ var (
 		Help:    "Время выполнения запросов к БД",
 		Buckets: prometheus.DefBuckets,
 	}, []string{"query_name"})
+
+	ReportsGeneratedTotal = promauto.NewCounterVec(prometheus.CounterOpts{
+		Name: "bot_reports_generated_total",
+		Help: "Количество сгенерированных отчетов",
+	}, []string{"report_type"})
+
+	ReportDuration = promauto.NewHistogramVec(prometheus.HistogramOpts{
+		Name:    "bot_report_duration_seconds",
+		Help:    "Время генерации отчета",
+		Buckets: prometheus.DefBuckets,
+	}, []string{"report_type"})
 )
