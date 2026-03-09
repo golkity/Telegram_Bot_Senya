@@ -7,6 +7,7 @@ import (
 
 	"telegram_bot/internal/bot/keyboards"
 	"telegram_bot/internal/modules/user"
+	"telegram_bot/pkg/metrics"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -22,6 +23,7 @@ func (h *Handler) HandleCuratorMyStudents(ctx context.Context, msg *tgbotapi.Mes
 	students, err := h.userSvc.GetStudentsByCurator(ctx, msg.From.ID)
 	if err != nil {
 		h.log.Error("failed to get students", "curator_id", msg.From.ID, "error", err)
+		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка получения списка студентов.", nil)
 		return
 	}
@@ -72,6 +74,7 @@ func (h *Handler) HandleCuratorDailyReport(ctx context.Context, msg *tgbotapi.Me
 	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "curator_daily")
 	if err != nil {
 		h.log.Error("failed to queue report", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Очередь занята, попробуйте позже.", nil)
 	}
 }
@@ -83,6 +86,7 @@ func (h *Handler) HandleCuratorWeeklyReport(ctx context.Context, msg *tgbotapi.M
 	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "curator_weekly")
 	if err != nil {
 		h.log.Error("failed to queue report", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Очередь занята, попробуйте позже.", nil)
 	}
 }
@@ -94,6 +98,7 @@ func (h *Handler) HandleWordReport(ctx context.Context, msg *tgbotapi.Message) {
 	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "word_weekly")
 	if err != nil {
 		h.log.Error("failed to queue report", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Очередь занята, попробуйте позже.", nil)
 	}
 }
@@ -105,6 +110,7 @@ func (h *Handler) HandleSubmissionReportExcel(ctx context.Context, msg *tgbotapi
 	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "excel_submissions")
 	if err != nil {
 		h.log.Error("failed to queue report", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Очередь занята, попробуйте позже.", nil)
 	}
 }
@@ -116,6 +122,7 @@ func (h *Handler) HandleSummaryExcel(ctx context.Context, msg *tgbotapi.Message)
 	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "excel_summary")
 	if err != nil {
 		h.log.Error("failed to queue report", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Очередь занята, попробуйте позже.", nil)
 	}
 }
@@ -125,6 +132,7 @@ func (h *Handler) HandleViewStudentWorks(ctx context.Context, msg *tgbotapi.Mess
 
 	students, err := h.userSvc.GetStudentsByCurator(ctx, msg.From.ID)
 	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "Ошибка получения списка.", nil)
 		return
 	}

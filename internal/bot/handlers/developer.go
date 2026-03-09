@@ -6,12 +6,16 @@ import (
 
 	"telegram_bot/internal/bot/keyboards"
 	"telegram_bot/internal/modules/user"
+	"telegram_bot/pkg/metrics"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
 func (h *Handler) checkDeveloperPermission(ctx context.Context, chatID int64, userID int64) bool {
 	u, err := h.userSvc.GetUserInfo(ctx, userID)
+	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("developer_handler").Inc()
+	}
 	if err != nil || (u.Role != user.RoleDeveloper && u.Role != user.RoleAdmin) {
 		h.SendMessage(chatID, "⛔ У вас нет доступа к панели разработчика.", nil)
 		return false
@@ -39,6 +43,7 @@ func (h *Handler) HandleSelectCurator(ctx context.Context, msg *tgbotapi.Message
 	curators, err := h.userSvc.GetAllCurators(ctx)
 	if err != nil {
 		h.log.Error("failed to fetch curators", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("developer_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка при получении списка кураторов.", nil)
 		return
 	}

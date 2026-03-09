@@ -9,6 +9,7 @@ import (
 
 	"telegram_bot/internal/bot/keyboards"
 	"telegram_bot/internal/modules/submission"
+	"telegram_bot/pkg/metrics"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -55,7 +56,7 @@ func (h *Handler) DeleteMessages(chatID int64, messageIDs []int) {
 		for _, msgID := range messageIDs {
 			delMsg := tgbotapi.NewDeleteMessage(chatID, msgID)
 			_, _ = h.bot.Request(delMsg)
-			time.Sleep(50 * time.Millisecond) // Защита от лимитов Telegram (Too Many Requests)
+			time.Sleep(50 * time.Millisecond)
 		}
 	}()
 }
@@ -66,6 +67,7 @@ func (h *Handler) HandleSubmissionStart(ctx context.Context, msg *tgbotapi.Messa
 
 	u, err := h.userSvc.GetUserInfo(ctx, userID)
 	if err != nil || u == nil {
+		metrics.ErrorsTotal.WithLabelValues("submission_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка получения данных пользователя.", nil)
 		return
 	}
@@ -258,6 +260,7 @@ func (h *Handler) HandleSubmissionDone(ctx context.Context, msg *tgbotapi.Messag
 
 	if len(files) == 0 {
 		h.log.Error("failed to parse files from state", "rawFiles_type", fmt.Sprintf("%T", rawFiles), "data", rawFiles)
+		metrics.ErrorsTotal.WithLabelValues("submission_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка чтения файлов из памяти. Пожалуйста, начните сдачу заново.", keyboards.SubmissionProcessMenu)
 		return
 	}
@@ -290,7 +293,7 @@ func (h *Handler) HandleSubmissionFinalize(ctx context.Context, msg *tgbotapi.Me
 	}
 	h.DeleteMessages(msg.Chat.ID, garbageIDs)
 
-	waitMsgConfig := tgbotapi.NewMessage(msg.Chat.ID, "⏳ Обрабатываю и сохраняю файлы...")
+	waitMsgConfig := tgbotapi.NewMessage(msg.Chat.ID, "⏳ Обрабатываю и сохраняю файлов...")
 	waitMsg, err := h.bot.Send(waitMsgConfig)
 	if err != nil {
 		h.log.Error("failed to send wait message", "error", err)
@@ -371,8 +374,11 @@ func (h *Handler) HandleSubmissionFinalize(ctx context.Context, msg *tgbotapi.Me
 
 	if err := h.submissionSvc.ProcessSubmission(ctx, input); err != nil {
 		h.log.Error("submission save failed", "err", err)
+		metrics.ErrorsTotal.WithLabelValues("submission_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка сохранения. Пожалуйста, попробуй позже.", keyboards.StudentMenu)
 	} else {
+		metrics.SubmissionsTotal.WithLabelValues(sType).Inc()
+
 		if curatorID != 0 && curatorID != userID {
 			notification := fmt.Sprintf("🔔 <b>Новая сдача!</b>\n👤 %s\n📚 %s: %s\n📎 Файлов: %d",
 				studentName, sType, task, len(files))

@@ -12,6 +12,7 @@ import (
 	"telegram_bot/internal/modules/report"
 	"telegram_bot/internal/modules/submission"
 	"telegram_bot/internal/modules/user"
+	"telegram_bot/pkg/metrics"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -60,6 +61,7 @@ func (h *Handler) SendMessage(chatID int64, text string, kb interface{}) {
 	}
 	if _, err := h.bot.Send(msg); err != nil {
 		h.log.Error("failed to send message", "chat_id", chatID, "error", err)
+		metrics.ErrorsTotal.WithLabelValues("telegram_api").Inc()
 	}
 }
 
@@ -83,6 +85,7 @@ func (h *Handler) SendCleanMessage(chatID int64, text string, kb interface{}) {
 	sentMsg, err := h.bot.Send(msg)
 	if err != nil {
 		h.log.Error("failed to send clean message", "chat_id", chatID, "error", err)
+		metrics.ErrorsTotal.WithLabelValues("telegram_api").Inc()
 		return
 	}
 
@@ -99,6 +102,7 @@ func (h *Handler) EditMessageText(chatID int64, messageID int, text string, kb i
 	}
 	if _, err := h.bot.Send(msg); err != nil {
 		h.log.Error("failed to edit message", "chat_id", chatID, "msg_id", messageID, "error", err)
+		metrics.ErrorsTotal.WithLabelValues("telegram_api").Inc()
 	}
 }
 
@@ -147,6 +151,7 @@ func (h *Handler) SendFile(chatID int64, fileData interface{}, fileName string, 
 	if fileRequest != nil {
 		if _, err := h.bot.Send(fileRequest); err != nil {
 			h.log.Error("failed to send file", "chat_id", chatID, "error", err)
+			metrics.ErrorsTotal.WithLabelValues("telegram_api").Inc()
 		}
 	}
 }
@@ -155,6 +160,7 @@ func (h *Handler) AnswerCallback(callbackID string, text string) {
 	resp := tgbotapi.NewCallback(callbackID, text)
 	if _, err := h.bot.Request(resp); err != nil {
 		h.log.Error("failed to answer callback", "callback_id", callbackID, "error", err)
+		metrics.ErrorsTotal.WithLabelValues("telegram_api").Inc()
 	}
 }
 
@@ -226,6 +232,7 @@ func (h *Handler) HandleGenericText(ctx context.Context, msg *tgbotapi.Message) 
 		err := h.cmsSvc.UpdateSetting(ctx, keyToUpdate, newValue)
 		if err != nil {
 			h.log.Error("failed to update cms setting", "key", keyToUpdate, "err", err)
+			metrics.ErrorsTotal.WithLabelValues("cms_db").Inc()
 			h.SendCleanMessage(msg.Chat.ID, "❌ Ошибка при сохранении настройки.", keyboards.CustomizationMenu)
 		} else {
 			h.SendCleanMessage(msg.Chat.ID, fmt.Sprintf("✅ Настройка <b>%s</b> успешно обновлена!\n\n<i>Новое значение:</i> %s", keyToUpdate, newValue), keyboards.CustomizationMenu)
@@ -264,6 +271,7 @@ func (h *Handler) HandleCuratorSendReminderText(ctx context.Context, msg *tgbota
 	err := h.userSvc.BroadcastToStudents(ctx, curatorID, reminderText)
 	if err != nil {
 		h.log.Error("failed to broadcast reminder", "curator_id", curatorID, "error", err)
+		metrics.ErrorsTotal.WithLabelValues("bot_broadcast").Inc()
 		h.SendCleanMessage(msg.Chat.ID, "❌ Ошибка при отправке рассылки.", nil)
 	} else {
 		h.SendCleanMessage(msg.Chat.ID, "✅ Напоминание отправлено всем вашим студентам.", keyboards.CuratorMenu)

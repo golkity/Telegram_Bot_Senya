@@ -113,7 +113,7 @@ func (r *repo) GetByID(ctx context.Context, id int64) (*User, error) {
 func (r *repo) GetAll(ctx context.Context) ([]User, error) {
 	q := `
        SELECT u.user_id, COALESCE(u.username, ''), COALESCE(u.first_name, ''), COALESCE(u.last_name, ''), 
-              ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications 
+              COALESCE(ur.role, 'student'), ur.course_id, ur.curator_id, u.registration_date, COALESCE(ur.admin_notifications, false) 
        FROM users u
        LEFT JOIN user_roles ur ON u.user_id = ur.user_id
     `

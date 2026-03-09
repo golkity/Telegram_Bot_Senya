@@ -8,6 +8,7 @@ import (
 
 	"telegram_bot/internal/bot/keyboards"
 	"telegram_bot/internal/modules/user"
+	"telegram_bot/pkg/metrics"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -26,6 +27,8 @@ func (h *Handler) HandleStart(ctx context.Context, msg *tgbotapi.Message) {
 
 	h.deleteUserMessage(msg)
 
+	metrics.UpdatesTotal.WithLabelValues("/start").Inc()
+
 	u := user.User{
 		ID:        msg.From.ID,
 		Username:  msg.From.UserName,
@@ -36,6 +39,7 @@ func (h *Handler) HandleStart(ctx context.Context, msg *tgbotapi.Message) {
 
 	if err := h.userSvc.RegisterOrUpdate(ctx, u); err != nil {
 		h.log.Error("registration failed", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("bot_handler").Inc()
 		h.SendCleanMessage(msg.Chat.ID, "⚠️ Произошла ошибка системы. Пожалуйста, попробуй позже.", nil)
 		return
 	}
@@ -43,6 +47,7 @@ func (h *Handler) HandleStart(ctx context.Context, msg *tgbotapi.Message) {
 	actualUser, err := h.userSvc.GetUserInfo(ctx, u.ID)
 	if err != nil {
 		h.log.Error("failed to get user info", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("bot_handler").Inc()
 		actualUser = &u
 	}
 
@@ -107,6 +112,8 @@ func (h *Handler) HandleCourseSelection(ctx context.Context, msg *tgbotapi.Messa
 
 	courses, err := h.userSvc.GetAllCourses(ctx)
 	if err != nil {
+		h.log.Error("failed to load courses", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("bot_handler").Inc()
 		h.SendCleanMessage(msg.Chat.ID, "❌ Ошибка загрузки курсов. Попробуй позже.", nil)
 		return
 	}
@@ -137,6 +144,7 @@ func (h *Handler) HandleCuratorSelectionForStudent(ctx context.Context, msg *tgb
 	curators, err := h.userSvc.GetCuratorsByCourse(ctx, *u.CourseID)
 	if err != nil {
 		h.log.Error("failed to load curators", "course_id", *u.CourseID, "error", err)
+		metrics.ErrorsTotal.WithLabelValues("bot_handler").Inc()
 		h.SendCleanMessage(msg.Chat.ID, "❌ Ошибка загрузки списка кураторов.", nil)
 		return
 	}

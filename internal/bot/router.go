@@ -8,10 +8,9 @@ import (
 	"telegram_bot/internal/bot/handlers"
 	"telegram_bot/internal/modules/submission"
 	"telegram_bot/internal/modules/telemetry"
+	"telegram_bot/pkg/metrics"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
-	"github.com/prometheus/client_golang/prometheus"
-	"github.com/prometheus/client_golang/prometheus/promauto"
 )
 
 type Router struct {
@@ -20,13 +19,6 @@ type Router struct {
 	handler   *handlers.Handler
 	telemetry *telemetry.LatencyOptimizer
 }
-
-var (
-	updatesCounter = promauto.NewCounter(prometheus.CounterOpts{
-		Name: "bot_incoming_updates_total",
-		Help: "Общее количество входящих апдейтов от Telegram",
-	})
-)
 
 func NewRouter(
 	bot *tgbotapi.BotAPI,
@@ -53,7 +45,7 @@ func (r *Router) Start() {
 	safeHandler := r.WithMiddleware(r.handleUpdate)
 
 	for update := range updates {
-		updatesCounter.Inc()
+		metrics.UpdatesTotal.WithLabelValues("incoming_update").Inc()
 
 		go func(upd tgbotapi.Update) {
 			ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)

@@ -7,6 +7,7 @@ import (
 
 	"telegram_bot/internal/bot/keyboards"
 	"telegram_bot/internal/modules/user"
+	"telegram_bot/pkg/metrics"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -130,6 +131,7 @@ func (h *Handler) HandleDeleteConfirm(ctx context.Context, msg *tgbotapi.Message
 			targetID = int64(v)
 		default:
 			h.log.Error("failed to parse delete_target_id from state", "rawID_type", fmt.Sprintf("%T", rawID))
+			metrics.ErrorsTotal.WithLabelValues("admin_handler").Inc()
 			h.SendMessage(msg.Chat.ID, "❌ Ошибка памяти. Попробуйте снова.", keyboards.UserManagementMenu)
 			return
 		}
@@ -139,6 +141,7 @@ func (h *Handler) HandleDeleteConfirm(ctx context.Context, msg *tgbotapi.Message
 		err := h.userSvc.DeleteUser(ctx, targetID)
 		if err != nil {
 			h.log.Error("failed to delete user", "target_id", targetID, "error", err)
+			metrics.ErrorsTotal.WithLabelValues("admin_handler").Inc()
 			h.SendMessage(msg.Chat.ID, "❌ Ошибка при удалении. Проверьте логи сервера.", keyboards.UserManagementMenu)
 		} else {
 			h.SendMessage(msg.Chat.ID, "✅ Пользователь успешно удален.", keyboards.UserManagementMenu)
@@ -247,6 +250,7 @@ func (h *Handler) HandleTransferConfirm(ctx context.Context, msg *tgbotapi.Messa
 		err := h.userSvc.TransferStudents(ctx, sourceID, targetID)
 		if err != nil {
 			h.log.Error("failed to transfer students", "source", sourceID, "target", targetID, "error", err)
+			metrics.ErrorsTotal.WithLabelValues("admin_handler").Inc()
 			h.SendMessage(msg.Chat.ID, "❌ Ошибка при переносе. Проверьте логи.", keyboards.AdminMenu)
 		} else {
 			h.SendMessage(msg.Chat.ID, fmt.Sprintf("✅ Заявка на перенос от %d к %d выполнена.", sourceID, targetID), keyboards.AdminMenu)
@@ -262,6 +266,7 @@ func (h *Handler) HandleAdminDailyReport(ctx context.Context, msg *tgbotapi.Mess
 	text, err := h.userSvc.GetDailyAdminStatsText(ctx)
 	if err != nil {
 		h.log.Error("failed to get daily admin stats", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("admin_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка сбора ежедневной статистики", nil)
 		return
 	}
@@ -371,6 +376,7 @@ func (h *Handler) HandleAdminStudentsByCourse(ctx context.Context, msg *tgbotapi
 	statsText, err := h.userSvc.GetCourseStatisticsText(ctx)
 	if err != nil {
 		h.log.Error("failed to get course statistics", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("admin_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка при получении данных базы.", nil)
 		return
 	}
@@ -387,6 +393,7 @@ func (h *Handler) HandleAdminCuratorStudents(ctx context.Context, msg *tgbotapi.
 	statsText, err := h.userSvc.GetCuratorStatisticsText(ctx)
 	if err != nil {
 		h.log.Error("failed to get curator statistics", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("admin_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка при получении данных.", nil)
 		return
 	}
