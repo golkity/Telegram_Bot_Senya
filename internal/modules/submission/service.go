@@ -16,6 +16,7 @@ import (
 
 	"telegram_bot/pkg/compressor"
 	"telegram_bot/pkg/crypto"
+	"telegram_bot/pkg/metrics"
 )
 
 type FileUploader interface {
@@ -60,16 +61,13 @@ func (s *Service) ProcessSubmission(ctx context.Context, input InputDTO) error {
 	s3Paths := make([]string, len(input.Files))
 	originalNames := make([]string, len(input.Files))
 
-	// Подготовка имен
 	courseSafe := strings.ReplaceAll(input.CourseName, " ", "_")
 	curatorSafe := strings.ReplaceAll(input.CuratorName, " ", "_")
 	studentSafe := strings.ReplaceAll(input.StudentName, " ", "_")
 
-	// Считаем время старта всей пачки
 	batchStart := time.Now()
 	s.log.Info("Starting parallel processing", "files_count", len(input.Files))
 
-	// Ставим 5 одновременных потоков. Это оптимально для большинства VPS.
 	sem := make(chan struct{}, 5)
 	g, gCtx := errgroup.WithContext(ctx)
 
@@ -87,26 +85,26 @@ func (s *Service) ProcessSubmission(ctx context.Context, input InputDTO) error {
 				courseSafe, curatorSafe, studentSafe, input.TaskNumber,
 				uuid.New().String()[:8], safeFileName)
 
-			// 1. Скачивание
 			originalStream, err := s.downloader.GetFileContent(fileDTO.FileID)
 			if err != nil {
+				metrics.ErrorsTotal.WithLabelValues("submission_file_download").Inc()
 				return fmt.Errorf("file %d download error: %w", idx, err)
 			}
 			defer originalStream.Close()
 
-			// 2. Сжатие и шифрование в буфер
 			compressed := compressor.CompressStream(originalStream)
 			encrypted, err := crypto.EncryptStream(compressed, s.encKey)
 			if err != nil {
+				metrics.ErrorsTotal.WithLabelValues("submission_crypto").Inc()
 				return err
 			}
 
 			processedData, err := io.ReadAll(encrypted)
 			if err != nil {
+				metrics.ErrorsTotal.WithLabelValues("submission_stream_read").Inc()
 				return err
 			}
 
-			// 3. Загрузка в S3
 			err = s.uploader.UploadFile(
 				gCtx,
 				s3Path,
@@ -115,6 +113,7 @@ func (s *Service) ProcessSubmission(ctx context.Context, input InputDTO) error {
 				"application/octet-stream",
 			)
 			if err != nil {
+				metrics.ErrorsTotal.WithLabelValues("submission_s3_upload").Inc()
 				return fmt.Errorf("file %d s3 upload error: %w", idx, err)
 			}
 
@@ -177,6 +176,7 @@ func (s *Service) GenerateUserArchive(ctx context.Context, userID int64) (string
 
 	tempFile, err := os.CreateTemp("", fmt.Sprintf("archive_%d_*.zip", userID))
 	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("archive_temp_file").Inc()
 		return "", fmt.Errorf("failed to create temp file: %w", err)
 	}
 	defer os.Remove(tempFile.Name())
@@ -221,11 +221,13 @@ func (s *Service) GenerateUserArchive(ctx context.Context, userID int64) (string
 
 			if err != nil {
 				s.log.Error("archive: skipping file due to error", "path", s3Path, "err", err)
+				metrics.ErrorsTotal.WithLabelValues("archive_file_skip").Inc()
 			}
 		}
 	}
 
 	if err := zipWriter.Close(); err != nil {
+		metrics.ErrorsTotal.WithLabelValues("archive_zip_close").Inc()
 		return "", err
 	}
 
@@ -234,6 +236,7 @@ func (s *Service) GenerateUserArchive(ctx context.Context, userID int64) (string
 
 	archivePath := fmt.Sprintf("archives/student_%d/archive_%d.zip", userID, time.Now().Unix())
 	if err := s.uploader.UploadFile(ctx, archivePath, tempFile, stat.Size(), "application/zip"); err != nil {
+		metrics.ErrorsTotal.WithLabelValues("archive_s3_upload").Inc()
 		return "", err
 	}
 
@@ -265,6 +268,7 @@ func (s *Service) MigrateStudentFiles(ctx context.Context, studentID int64, newC
 						changed = true
 					} else {
 						s.log.Error("s3 migration failed", "old", oldPath, "err", err)
+						metrics.ErrorsTotal.WithLabelValues("s3_migration").Inc()
 						updatedPaths = append(updatedPaths, oldPath)
 					}
 				} else {
@@ -279,6 +283,7 @@ func (s *Service) MigrateStudentFiles(ctx context.Context, studentID int64, newC
 			err = s.repo.UpdatePathsAndCurator(ctx, sub.ID, newCuratorID, updatedPaths)
 			if err != nil {
 				s.log.Error("db path update failed", "sub_id", sub.ID, "err", err)
+				metrics.ErrorsTotal.WithLabelValues("db_path_update").Inc()
 			}
 		}
 	}

@@ -6,8 +6,10 @@ import (
 	"fmt"
 	"log/slog"
 	"strings"
-	"telegram_bot/internal/modules/report"
 	"time"
+
+	"telegram_bot/internal/modules/report"
+	"telegram_bot/pkg/metrics"
 )
 
 type Notifier interface {
@@ -127,6 +129,7 @@ func (s *Service) BroadcastToStudents(ctx context.Context, curatorID int64, text
 			if s.notifier != nil {
 				if err := s.notifier.Notify(student.ID, text); err != nil {
 					s.log.Warn("failed to notify student", "id", student.ID, "error", err)
+					metrics.ErrorsTotal.WithLabelValues("broadcast_student_fail").Inc()
 				} else {
 					successCount++
 				}
@@ -159,6 +162,8 @@ func (s *Service) SendGlobalReminders(ctx context.Context) error {
 				if s.notifier != nil {
 					if err := s.notifier.Notify(u.ID, "🔔 Не забудьте сдать работы сегодня!"); err == nil {
 						sent++
+					} else {
+						metrics.ErrorsTotal.WithLabelValues("global_reminder_fail").Inc()
 					}
 				}
 				time.Sleep(50 * time.Millisecond)
@@ -240,6 +245,7 @@ func (s *Service) TransferStudents(ctx context.Context, sourceID, targetID int64
 
 		if err := s.notifier.Notify(targetID, msg); err != nil {
 			s.log.Warn("failed to notify target curator about transfer", "target_id", targetID, "error", err)
+			metrics.ErrorsTotal.WithLabelValues("transfer_notify_fail").Inc()
 		}
 	}
 	return nil

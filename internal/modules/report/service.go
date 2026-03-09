@@ -5,6 +5,8 @@ import (
 	"fmt"
 	"log/slog"
 	"time"
+
+	"telegram_bot/pkg/metrics"
 )
 
 type Service struct {
@@ -33,6 +35,7 @@ func (s *Service) RequestReport(ctx context.Context, userID int64, reportType st
 	case s.taskChan <- Task{AdminChatID: userID, ReportType: reportType}:
 		s.log.Info("report task enqueued", "user_id", userID, "type", reportType)
 	default:
+		metrics.ErrorsTotal.WithLabelValues("report_queue_full").Inc()
 		return fmt.Errorf("report queue is full")
 	}
 	return nil
@@ -43,6 +46,7 @@ func (s *Service) RequestCuratorExcelReport(ctx context.Context, curatorID int64
 	case s.taskChan <- Task{AdminChatID: curatorID, CourseID: courseID, ReportType: "excel_summary"}:
 		s.log.Info("curator excel report enqueued", "curator_id", curatorID)
 	default:
+		metrics.ErrorsTotal.WithLabelValues("report_queue_full").Inc()
 		return fmt.Errorf("report queue is full")
 	}
 	return nil

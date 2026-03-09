@@ -7,6 +7,8 @@ import (
 	"net/url"
 	"time"
 
+	"telegram_bot/pkg/metrics"
+
 	"github.com/aws/aws-sdk-go-v2/aws"
 	"github.com/aws/aws-sdk-go-v2/config"
 	"github.com/aws/aws-sdk-go-v2/credentials"
@@ -48,6 +50,8 @@ func New(ctx context.Context, endpoint, accessKey, secretKey, bucket string) (*C
 }
 
 func (c *Client) UploadFile(ctx context.Context, objectName string, reader io.Reader, size int64, contentType string) error {
+	start := time.Now()
+
 	_, err := c.s3Client.PutObject(ctx, &s3.PutObjectInput{
 		Bucket:        aws.String(c.bucket),
 		Key:           aws.String(objectName),
@@ -55,47 +59,79 @@ func (c *Client) UploadFile(ctx context.Context, objectName string, reader io.Re
 		ContentLength: aws.Int64(size),
 		ContentType:   aws.String(contentType),
 	})
+
+	metrics.S3OperationDuration.WithLabelValues("upload").Observe(time.Since(start).Seconds())
+
 	if err != nil {
+		metrics.S3OperationsTotal.WithLabelValues("upload", "error").Inc()
 		return fmt.Errorf("upload to s3 failed: %w", err)
 	}
+
+	metrics.S3OperationsTotal.WithLabelValues("upload", "success").Inc()
 	return nil
 }
 
 func (c *Client) GetPresignedURL(ctx context.Context, objectName string, lifetime time.Duration) (string, error) {
+	start := time.Now()
+
 	request, err := c.presignClient.PresignGetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(objectName),
 	}, s3.WithPresignExpires(lifetime))
 
+	metrics.S3OperationDuration.WithLabelValues("presign").Observe(time.Since(start).Seconds())
+
 	if err != nil {
+		metrics.S3OperationsTotal.WithLabelValues("presign", "error").Inc()
 		return "", fmt.Errorf("failed to sign url: %w", err)
 	}
 
+	metrics.S3OperationsTotal.WithLabelValues("presign", "success").Inc()
 	return request.URL, nil
 }
 
 func (c *Client) DownloadFile(ctx context.Context, objectName string) (io.ReadCloser, error) {
+	start := time.Now()
+
 	out, err := c.s3Client.GetObject(ctx, &s3.GetObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(objectName),
 	})
+
+	metrics.S3OperationDuration.WithLabelValues("download").Observe(time.Since(start).Seconds())
+
 	if err != nil {
+		metrics.S3OperationsTotal.WithLabelValues("download", "error").Inc()
 		return nil, fmt.Errorf("failed to download file from S3: %w", err)
 	}
+
+	metrics.S3OperationsTotal.WithLabelValues("download", "success").Inc()
 	return out.Body, nil
 }
 
 func (c *Client) DeleteFile(ctx context.Context, objectName string) error {
+	start := time.Now()
+
 	_, err := c.s3Client.DeleteObject(ctx, &s3.DeleteObjectInput{
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(objectName),
 	})
-	return err
+
+	metrics.S3OperationDuration.WithLabelValues("delete").Observe(time.Since(start).Seconds())
+
+	if err != nil {
+		metrics.S3OperationsTotal.WithLabelValues("delete", "error").Inc()
+		return err
+	}
+
+	metrics.S3OperationsTotal.WithLabelValues("delete", "success").Inc()
+	return nil
 }
 
 func (c *Client) MoveFile(ctx context.Context, oldKey, newKey string) error {
-	source := fmt.Sprintf("%s/%s", c.bucket, oldKey)
+	start := time.Now()
 
+	source := fmt.Sprintf("%s/%s", c.bucket, oldKey)
 	u := &url.URL{Path: source}
 	sourceEncoded := u.String()
 
@@ -105,6 +141,8 @@ func (c *Client) MoveFile(ctx context.Context, oldKey, newKey string) error {
 		Key:        aws.String(newKey),
 	})
 	if err != nil {
+		metrics.S3OperationDuration.WithLabelValues("move").Observe(time.Since(start).Seconds())
+		metrics.S3OperationsTotal.WithLabelValues("move", "error").Inc()
 		return fmt.Errorf("copy failed: %w", err)
 	}
 
@@ -112,5 +150,14 @@ func (c *Client) MoveFile(ctx context.Context, oldKey, newKey string) error {
 		Bucket: aws.String(c.bucket),
 		Key:    aws.String(oldKey),
 	})
-	return err
+
+	metrics.S3OperationDuration.WithLabelValues("move").Observe(time.Since(start).Seconds())
+
+	if err != nil {
+		metrics.S3OperationsTotal.WithLabelValues("move", "error").Inc()
+		return err
+	}
+
+	metrics.S3OperationsTotal.WithLabelValues("move", "success").Inc()
+	return nil
 }

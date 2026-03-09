@@ -4,8 +4,10 @@ import (
 	"context"
 	"fmt"
 	"log/slog"
-	"telegram_bot/internal/modules/report"
 	"time"
+
+	"telegram_bot/internal/modules/report"
+	"telegram_bot/pkg/metrics"
 )
 
 type StrictReportStream interface {
@@ -41,6 +43,7 @@ func ProcessReportJob(
 	log *slog.Logger,
 ) {
 	log.Info("worker started processing report", "admin_id", task.AdminChatID, "type", task.ReportType)
+	start := time.Now()
 
 	var fileBytes []byte
 	var fileName string
@@ -52,6 +55,7 @@ func ProcessReportJob(
 		data, errGet := provider.GetStats(ctx, "")
 		if errGet != nil {
 			log.Error("failed to fetch stats", "error", errGet)
+			metrics.ErrorsTotal.WithLabelValues("report_worker").Inc()
 			_ = sender.SendFile(task.AdminChatID, nil, "", "❌ Ошибка сбора данных :(")
 			return
 		}
@@ -62,6 +66,7 @@ func ProcessReportJob(
 		stream, errGen := gen.NewStrictSubmissionsStream()
 		if errGen != nil {
 			log.Error("failed to init strict submissions stream", "error", errGen)
+			metrics.ErrorsTotal.WithLabelValues("report_worker").Inc()
 			_ = sender.SendFile(task.AdminChatID, nil, "", "❌ Ошибка инициализации генератора :(")
 			return
 		}
@@ -69,6 +74,7 @@ func ProcessReportJob(
 		headerData, errGet := provider.StreamStrictSubmissionsReport(ctx, stream.WriteRow)
 		if errGet != nil {
 			log.Error("failed to stream strict submissions", "error", errGet)
+			metrics.ErrorsTotal.WithLabelValues("report_worker").Inc()
 			_ = sender.SendFile(task.AdminChatID, nil, "", "❌ Ошибка сбора данных о сдачах :(")
 			return
 		}
@@ -80,6 +86,7 @@ func ProcessReportJob(
 		data, errGet := provider.GetWeeklyReportsReport(ctx)
 		if errGet != nil {
 			log.Error("failed to fetch weekly reports", "error", errGet)
+			metrics.ErrorsTotal.WithLabelValues("report_worker").Inc()
 			_ = sender.SendFile(task.AdminChatID, nil, "", "❌ Ошибка сбора еженедельных отчетов")
 			return
 		}
@@ -91,6 +98,7 @@ func ProcessReportJob(
 		data, errGet := provider.GetStudentSheetsReport(ctx)
 		if errGet != nil {
 			log.Error("failed to fetch student sheets", "error", errGet)
+			metrics.ErrorsTotal.WithLabelValues("report_worker").Inc()
 			_ = sender.SendFile(task.AdminChatID, nil, "", "❌ Ошибка сбора листов по ученикам")
 			return
 		}
@@ -107,6 +115,7 @@ func ProcessReportJob(
 		data, errGet := provider.GetCuratorStatsReport(ctx, task.AdminChatID)
 		if errGet != nil {
 			log.Error("failed to fetch stats", "error", errGet)
+			metrics.ErrorsTotal.WithLabelValues("report_worker").Inc()
 			_ = sender.SendFile(task.AdminChatID, nil, "", "❌ Ошибка сбора данных куратора :(")
 			return
 		}
@@ -122,6 +131,7 @@ func ProcessReportJob(
 
 	if err != nil {
 		log.Error("failed to generate excel", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("report_worker").Inc()
 		_ = sender.SendFile(task.AdminChatID, nil, "", "❌ Ошибка генерации отчета :(")
 		return
 	}
@@ -129,5 +139,9 @@ func ProcessReportJob(
 	err = sender.SendFile(task.AdminChatID, fileBytes, fileName, "Ваш отчет готов 📊")
 	if err != nil {
 		log.Error("failed to send file", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("report_worker_telegram").Inc() // <-- ДОБАВЛЕНО
 	}
+
+	metrics.ReportDuration.WithLabelValues(task.ReportType).Observe(time.Since(start).Seconds())
+	metrics.ReportsGeneratedTotal.WithLabelValues(task.ReportType).Inc()
 }
