@@ -4,6 +4,8 @@ import (
 	"context"
 	"log/slog"
 	"sync"
+
+	"telegram_bot/pkg/metrics"
 )
 
 type Service struct {
@@ -27,6 +29,7 @@ func (s *Service) LoadCache(ctx context.Context) error {
 	contents, err := s.repo.GetAll(ctx)
 	if err != nil {
 		s.log.Error("failed to load cms cache", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("cms_service").Inc()
 		return err
 	}
 

@@ -8,6 +8,8 @@ import (
 	"strings"
 	"time"
 
+	"telegram_bot/pkg/metrics"
+
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
 
@@ -61,6 +63,8 @@ func (r *Router) logging(next HandlerFunc) HandlerFunc {
 			typeStr = "unknown"
 		}
 
+		metrics.UpdatesTotal.WithLabelValues(typeStr).Inc()
+
 		defer func() {
 			r.log.Info("update processed",
 				slog.String("type", typeStr),
@@ -80,6 +84,8 @@ func (r *Router) panicRecovery(next HandlerFunc) HandlerFunc {
 	return func(ctx context.Context, update tgbotapi.Update) {
 		defer func() {
 			if err := recover(); err != nil {
+				metrics.ErrorsTotal.WithLabelValues("panic").Inc()
+
 				r.log.Error("PANIC RECOVERED",
 					slog.Any("error", err),
 					slog.String("stack", string(debug.Stack())),

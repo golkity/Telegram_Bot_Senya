@@ -5,9 +5,11 @@ import (
 	"errors"
 	"fmt"
 	"strings"
-	"telegram_bot/internal/modules/report"
-	"telegram_bot/pkg/postgres"
 	"time"
+
+	"telegram_bot/internal/modules/report"
+	"telegram_bot/pkg/metrics"
+	"telegram_bot/pkg/postgres"
 
 	"github.com/jackc/pgx/v5"
 )
@@ -56,8 +58,11 @@ func NewRepo(db *postgres.Client) Repository {
 }
 
 func (r *repo) Create(ctx context.Context, u User) error {
+	start := time.Now()
+
 	tx, err := r.db.Pool.Begin(ctx)
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_create", "error").Inc()
 		return err
 	}
 	defer tx.Rollback(ctx)
@@ -72,6 +77,7 @@ func (r *repo) Create(ctx context.Context, u User) error {
     `
 	_, err = tx.Exec(ctx, qUser, u.ID, u.Username, u.FirstName, u.LastName)
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_create", "error").Inc()
 		return fmt.Errorf("db create user error: %w", err)
 	}
 
@@ -82,13 +88,23 @@ func (r *repo) Create(ctx context.Context, u User) error {
     `
 	_, err = tx.Exec(ctx, qRoles, u.ID, u.Role)
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_create_roles", "error").Inc()
 		return fmt.Errorf("db create user_roles error: %w", err)
 	}
 
-	return tx.Commit(ctx)
+	err = tx.Commit(ctx)
+	metrics.DBQueryDuration.WithLabelValues("user_create").Observe(time.Since(start).Seconds())
+	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_create", "error").Inc()
+		return err
+	}
+	metrics.DBQueriesTotal.WithLabelValues("user_create", "success").Inc()
+	return nil
 }
 
 func (r *repo) GetByID(ctx context.Context, id int64) (*User, error) {
+	start := time.Now()
+
 	q := `
        SELECT u.user_id, COALESCE(u.username, ''), COALESCE(u.first_name, ''), COALESCE(u.last_name, ''), 
               COALESCE(ur.role, 'student'), ur.course_id, ur.curator_id, u.registration_date, COALESCE(ur.admin_notifications, false) 
@@ -101,24 +117,37 @@ func (r *repo) GetByID(ctx context.Context, id int64) (*User, error) {
 		&u.ID, &u.Username, &u.FirstName, &u.LastName,
 		&u.Role, &u.CourseID, &u.CuratorID, &u.RegisteredAt, &u.AdminNotifications,
 	)
+
+	metrics.DBQueryDuration.WithLabelValues("user_get_by_id").Observe(time.Since(start).Seconds())
+
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			metrics.DBQueriesTotal.WithLabelValues("user_get_by_id", "not_found").Inc()
 			return nil, ErrUserNotFound
 		}
+		metrics.DBQueriesTotal.WithLabelValues("user_get_by_id", "error").Inc()
 		return nil, fmt.Errorf("db get user error: %w", err)
 	}
+
+	metrics.DBQueriesTotal.WithLabelValues("user_get_by_id", "success").Inc()
 	return &u, nil
 }
 
 func (r *repo) GetAll(ctx context.Context) ([]User, error) {
+	start := time.Now()
+
 	q := `
        SELECT u.user_id, COALESCE(u.username, ''), COALESCE(u.first_name, ''), COALESCE(u.last_name, ''), 
-              ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications 
+              COALESCE(ur.role, 'student'), ur.course_id, ur.curator_id, u.registration_date, COALESCE(ur.admin_notifications, false) 
        FROM users u
        LEFT JOIN user_roles ur ON u.user_id = ur.user_id
     `
 	rows, err := r.db.Pool.Query(ctx, q)
+
+	metrics.DBQueryDuration.WithLabelValues("user_get_all").Observe(time.Since(start).Seconds())
+
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_all", "error").Inc()
 		return nil, err
 	}
 	defer rows.Close()
@@ -130,42 +159,78 @@ func (r *repo) GetAll(ctx context.Context) ([]User, error) {
 			&u.ID, &u.Username, &u.FirstName, &u.LastName,
 			&u.Role, &u.CourseID, &u.CuratorID, &u.RegisteredAt, &u.AdminNotifications,
 		); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("user_get_all", "error").Inc()
 			return nil, err
 		}
 		users = append(users, u)
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_all", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("user_get_all", "success").Inc()
 	return users, nil
 }
 
 func (r *repo) UpdateRole(ctx context.Context, id int64, role Role) error {
+	start := time.Now()
 	q := `INSERT INTO user_roles (user_id, role) VALUES ($1, $2) 
           ON CONFLICT (user_id) DO UPDATE SET role = EXCLUDED.role`
 	_, err := r.db.Pool.Exec(ctx, q, id, role)
+
+	metrics.DBQueryDuration.WithLabelValues("user_update_role").Observe(time.Since(start).Seconds())
+	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_update_role", "error").Inc()
+	} else {
+		metrics.DBQueriesTotal.WithLabelValues("user_update_role", "success").Inc()
+	}
 	return err
 }
 
 func (r *repo) UpdateCurator(ctx context.Context, studentID int64, curatorID *int64, courseID *string) error {
+	start := time.Now()
 	q := `UPDATE user_roles SET curator_id = $1, course_id = $2 WHERE user_id = $3`
 	_, err := r.db.Pool.Exec(ctx, q, curatorID, courseID, studentID)
+
+	metrics.DBQueryDuration.WithLabelValues("user_update_curator").Observe(time.Since(start).Seconds())
+	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_update_curator", "error").Inc()
+	} else {
+		metrics.DBQueriesTotal.WithLabelValues("user_update_curator", "success").Inc()
+	}
 	return err
 }
 
 func (r *repo) UpdateUserCourse(ctx context.Context, userID int64, courseID string) error {
+	start := time.Now()
 	q := `UPDATE user_roles SET course_id = $1 WHERE user_id = $2`
 	_, err := r.db.Pool.Exec(ctx, q, courseID, userID)
+
+	metrics.DBQueryDuration.WithLabelValues("user_update_course").Observe(time.Since(start).Seconds())
+	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_update_course", "error").Inc()
+	} else {
+		metrics.DBQueriesTotal.WithLabelValues("user_update_course", "success").Inc()
+	}
 	return err
 }
 
 func (r *repo) UpdateAdminNotifications(ctx context.Context, id int64, enabled bool) error {
+	start := time.Now()
 	q := `UPDATE user_roles SET admin_notifications = $1 WHERE user_id = $2`
 	_, err := r.db.Pool.Exec(ctx, q, enabled, id)
+
+	metrics.DBQueryDuration.WithLabelValues("user_update_notifications").Observe(time.Since(start).Seconds())
+	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_update_notifications", "error").Inc()
+	} else {
+		metrics.DBQueriesTotal.WithLabelValues("user_update_notifications", "success").Inc()
+	}
 	return err
 }
 
 func (r *repo) GetByRole(ctx context.Context, role Role) ([]User, error) {
+	start := time.Now()
 	q := `
        SELECT u.user_id, COALESCE(u.username, ''), COALESCE(u.first_name, ''), COALESCE(u.last_name, ''), 
               ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications
@@ -174,7 +239,10 @@ func (r *repo) GetByRole(ctx context.Context, role Role) ([]User, error) {
        WHERE ur.role = $1
     `
 	rows, err := r.db.Pool.Query(ctx, q, role)
+
+	metrics.DBQueryDuration.WithLabelValues("user_get_by_role").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_by_role", "error").Inc()
 		return nil, err
 	}
 	defer rows.Close()
@@ -186,17 +254,21 @@ func (r *repo) GetByRole(ctx context.Context, role Role) ([]User, error) {
 			&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Role,
 			&u.CourseID, &u.CuratorID, &u.RegisteredAt, &u.AdminNotifications,
 		); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("user_get_by_role", "error").Inc()
 			return nil, err
 		}
 		users = append(users, u)
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_by_role", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("user_get_by_role", "success").Inc()
 	return users, nil
 }
 
 func (r *repo) GetCuratorsByCourse(ctx context.Context, courseID string) ([]User, error) {
+	start := time.Now()
 	q := `
        SELECT u.user_id, COALESCE(u.username, ''), COALESCE(u.first_name, ''), COALESCE(u.last_name, ''), 
               ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications
@@ -206,7 +278,10 @@ func (r *repo) GetCuratorsByCourse(ctx context.Context, courseID string) ([]User
        WHERE ur.role = 'curator' AND cc.course_id = $1
     `
 	rows, err := r.db.Pool.Query(ctx, q, courseID)
+
+	metrics.DBQueryDuration.WithLabelValues("user_get_curators_course").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_curators_course", "error").Inc()
 		return nil, fmt.Errorf("db get curators by course error: %w", err)
 	}
 	defer rows.Close()
@@ -218,20 +293,27 @@ func (r *repo) GetCuratorsByCourse(ctx context.Context, courseID string) ([]User
 			&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Role,
 			&u.CourseID, &u.CuratorID, &u.RegisteredAt, &u.AdminNotifications,
 		); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("user_get_curators_course", "error").Inc()
 			return nil, err
 		}
 		users = append(users, u)
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_curators_course", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("user_get_curators_course", "success").Inc()
 	return users, nil
 }
 
 func (r *repo) GetAllCourses(ctx context.Context) ([]string, error) {
+	start := time.Now()
 	q := `SELECT course_name FROM courses ORDER BY id ASC`
 	rows, err := r.db.Pool.Query(ctx, q)
+
+	metrics.DBQueryDuration.WithLabelValues("user_get_all_courses").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_all_courses", "error").Inc()
 		return nil, err
 	}
 	defer rows.Close()
@@ -240,40 +322,55 @@ func (r *repo) GetAllCourses(ctx context.Context) ([]string, error) {
 	for rows.Next() {
 		var name string
 		if err := rows.Scan(&name); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("user_get_all_courses", "error").Inc()
 			return nil, err
 		}
 		courses = append(courses, name)
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_all_courses", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("user_get_all_courses", "success").Inc()
 	return courses, nil
 }
 
 func (r *repo) GetCourseIDByName(ctx context.Context, name string) (string, error) {
+	start := time.Now()
 	q := `SELECT course_id FROM courses WHERE course_name = $1`
 	var id string
 	err := r.db.Pool.QueryRow(ctx, q, name).Scan(&id)
+
+	metrics.DBQueryDuration.WithLabelValues("user_get_course_id").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_course_id", "error").Inc()
 		return "", err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("user_get_course_id", "success").Inc()
 	return id, nil
 }
 
 func (r *repo) GetCourseByName(ctx context.Context, name string) (*Course, error) {
+	start := time.Now()
 	q := `SELECT course_id, course_name FROM courses WHERE course_name = $1`
 	var c Course
 	err := r.db.Pool.QueryRow(ctx, q, name).Scan(&c.ID, &c.Name)
+
+	metrics.DBQueryDuration.WithLabelValues("user_get_course_name").Observe(time.Since(start).Seconds())
 	if err != nil {
 		if errors.Is(err, pgx.ErrNoRows) {
+			metrics.DBQueriesTotal.WithLabelValues("user_get_course_name", "not_found").Inc()
 			return nil, ErrCourseNotFound
 		}
+		metrics.DBQueriesTotal.WithLabelValues("user_get_course_name", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("user_get_course_name", "success").Inc()
 	return &c, nil
 }
 
 func (r *repo) GetByCuratorID(ctx context.Context, curatorID int64) ([]User, error) {
+	start := time.Now()
 	q := `
        SELECT u.user_id, COALESCE(u.username, ''), COALESCE(u.first_name, ''), COALESCE(u.last_name, ''), 
               ur.role, ur.course_id, ur.curator_id, u.registration_date, ur.admin_notifications
@@ -282,7 +379,10 @@ func (r *repo) GetByCuratorID(ctx context.Context, curatorID int64) ([]User, err
        WHERE ur.curator_id = $1
     `
 	rows, err := r.db.Pool.Query(ctx, q, curatorID)
+
+	metrics.DBQueryDuration.WithLabelValues("user_get_by_curator").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_by_curator", "error").Inc()
 		return nil, fmt.Errorf("db get students by curator error: %w", err)
 	}
 	defer rows.Close()
@@ -294,17 +394,21 @@ func (r *repo) GetByCuratorID(ctx context.Context, curatorID int64) ([]User, err
 			&u.ID, &u.Username, &u.FirstName, &u.LastName, &u.Role,
 			&u.CourseID, &u.CuratorID, &u.RegisteredAt, &u.AdminNotifications,
 		); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("user_get_by_curator", "error").Inc()
 			return nil, err
 		}
 		users = append(users, u)
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_by_curator", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("user_get_by_curator", "success").Inc()
 	return users, nil
 }
 
 func (r *repo) GetDailyStat(ctx context.Context, userID int64, date time.Time) (*DailyStat, error) {
+	start := time.Now()
 	q := `
        SELECT 
           COUNT(*) FILTER (WHERE submission_type = 'homework') as hw_count,
@@ -315,7 +419,10 @@ func (r *repo) GetDailyStat(ctx context.Context, userID int64, date time.Time) (
     `
 	var hwCount, notesCount, totalFiles int
 	err := r.db.Pool.QueryRow(ctx, q, userID, date).Scan(&hwCount, &notesCount, &totalFiles)
+
+	metrics.DBQueryDuration.WithLabelValues("user_daily_stat").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_daily_stat", "error").Inc()
 		return nil, err
 	}
 
@@ -329,6 +436,7 @@ func (r *repo) GetDailyStat(ctx context.Context, userID int64, date time.Time) (
 		notesStatus = "Выполнено"
 	}
 
+	metrics.DBQueriesTotal.WithLabelValues("user_daily_stat", "success").Inc()
 	return &DailyStat{
 		HomeworkStatus:  hwStatus,
 		NotesStatus:     notesStatus,
@@ -337,6 +445,7 @@ func (r *repo) GetDailyStat(ctx context.Context, userID int64, date time.Time) (
 }
 
 func (r *repo) Delete(ctx context.Context, userID int64) error {
+	start := time.Now()
 	batch := &pgx.Batch{}
 	batch.Queue(`UPDATE user_roles SET curator_id = NULL WHERE curator_id = $1`, userID)
 	batch.Queue(`DELETE FROM user_roles WHERE user_id = $1`, userID)
@@ -348,22 +457,39 @@ func (r *repo) Delete(ctx context.Context, userID int64) error {
 
 	for i := 0; i < 4; i++ {
 		if _, err := br.Exec(); err != nil {
+			metrics.DBQueryDuration.WithLabelValues("user_delete").Observe(time.Since(start).Seconds())
+			metrics.DBQueriesTotal.WithLabelValues("user_delete", "error").Inc()
 			return fmt.Errorf("batch exec %d failed: %w", i, err)
 		}
 	}
+
+	metrics.DBQueryDuration.WithLabelValues("user_delete").Observe(time.Since(start).Seconds())
+	metrics.DBQueriesTotal.WithLabelValues("user_delete", "success").Inc()
 	return nil
 }
 
 func (r *repo) TransferStudents(ctx context.Context, sourceCuratorID, targetCuratorID int64) error {
+	start := time.Now()
 	query := `UPDATE user_roles SET curator_id = $1 WHERE curator_id = $2`
 	_, err := r.db.Pool.Exec(ctx, query, targetCuratorID, sourceCuratorID)
+
+	metrics.DBQueryDuration.WithLabelValues("user_transfer").Observe(time.Since(start).Seconds())
+	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_transfer", "error").Inc()
+	} else {
+		metrics.DBQueriesTotal.WithLabelValues("user_transfer", "success").Inc()
+	}
 	return err
 }
 
 func (r *repo) GetStudentsByCurator(ctx context.Context, curatorID int64) ([]int64, error) {
+	start := time.Now()
 	q := `SELECT user_id FROM user_roles WHERE curator_id = $1`
 	rows, err := r.db.Pool.Query(ctx, q, curatorID)
+
+	metrics.DBQueryDuration.WithLabelValues("user_get_students_by_curator").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_students_by_curator", "error").Inc()
 		return nil, err
 	}
 	defer rows.Close()
@@ -372,17 +498,21 @@ func (r *repo) GetStudentsByCurator(ctx context.Context, curatorID int64) ([]int
 	for rows.Next() {
 		var id int64
 		if err := rows.Scan(&id); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("user_get_students_by_curator", "error").Inc()
 			return nil, err
 		}
 		ids = append(ids, id)
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_get_students_by_curator", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("user_get_students_by_curator", "success").Inc()
 	return ids, nil
 }
 
 func (r *repo) GetStudentsCountByCourse(ctx context.Context) (map[string]int, error) {
+	start := time.Now()
 	q := `
        SELECT COALESCE(c.course_name, ur.course_id, 'Неизвестный курс'), COUNT(ur.user_id)
        FROM user_roles ur
@@ -393,7 +523,10 @@ func (r *repo) GetStudentsCountByCourse(ctx context.Context) (map[string]int, er
     `
 
 	rows, err := r.db.Pool.Query(ctx, q)
+
+	metrics.DBQueryDuration.WithLabelValues("user_count_by_course").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_count_by_course", "error").Inc()
 		return nil, fmt.Errorf("db get students count by course error: %w", err)
 	}
 	defer rows.Close()
@@ -403,17 +536,21 @@ func (r *repo) GetStudentsCountByCourse(ctx context.Context) (map[string]int, er
 		var courseName string
 		var count int
 		if err := rows.Scan(&courseName, &count); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("user_count_by_course", "error").Inc()
 			return nil, err
 		}
 		stats[courseName] = count
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_count_by_course", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("user_count_by_course", "success").Inc()
 	return stats, nil
 }
 
 func (r *repo) GetStudentsCountByCurator(ctx context.Context) (map[string]int, error) {
+	start := time.Now()
 	q := `
        SELECT 
           COALESCE(curator.first_name || ' ' || curator.last_name, 'Без имени (ID: ' || ur.curator_id || ')'),
@@ -426,7 +563,10 @@ func (r *repo) GetStudentsCountByCurator(ctx context.Context) (map[string]int, e
     `
 
 	rows, err := r.db.Pool.Query(ctx, q)
+
+	metrics.DBQueryDuration.WithLabelValues("user_count_by_curator").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_count_by_curator", "error").Inc()
 		return nil, fmt.Errorf("db get students count by curator error: %w", err)
 	}
 	defer rows.Close()
@@ -436,17 +576,21 @@ func (r *repo) GetStudentsCountByCurator(ctx context.Context) (map[string]int, e
 		var curatorName string
 		var count int
 		if err := rows.Scan(&curatorName, &count); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("user_count_by_curator", "error").Inc()
 			return nil, err
 		}
 		stats[strings.TrimSpace(curatorName)] = count
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("user_count_by_curator", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("user_count_by_curator", "success").Inc()
 	return stats, nil
 }
 
 func (r *repo) GetSubmissionsReport(ctx context.Context) ([]report.SubmissionStat, error) {
+	start := time.Now()
 	q := `
        SELECT 
           TO_CHAR(s.submission_date, 'YYYY-MM-DD HH24:MI') as date,
@@ -462,7 +606,10 @@ func (r *repo) GetSubmissionsReport(ctx context.Context) ([]report.SubmissionSta
     `
 
 	rows, err := r.db.Pool.Query(ctx, q)
+
+	metrics.DBQueryDuration.WithLabelValues("report_submissions").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_submissions", "error").Inc()
 		return nil, fmt.Errorf("db get submissions error: %w", err)
 	}
 	defer rows.Close()
@@ -474,6 +621,7 @@ func (r *repo) GetSubmissionsReport(ctx context.Context) ([]report.SubmissionSta
 			&stat.Date, &stat.StudentName, &stat.CuratorName,
 			&stat.Type, &stat.Status,
 		); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("report_submissions", "error").Inc()
 			return nil, fmt.Errorf("scan error: %w", err)
 		}
 		if stat.Type == "homework" {
@@ -484,12 +632,15 @@ func (r *repo) GetSubmissionsReport(ctx context.Context) ([]report.SubmissionSta
 		stats = append(stats, stat)
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_submissions", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("report_submissions", "success").Inc()
 	return stats, nil
 }
 
 func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error) {
+	start := time.Now()
 	var totalUsers, courseStudents, courseDevs int
 	err := r.db.Pool.QueryRow(ctx, `
        SELECT 
@@ -499,6 +650,7 @@ func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, rowCallback fu
        FROM user_roles
     `).Scan(&totalUsers, &courseStudents, &courseDevs)
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_strict_stream_count", "error").Inc()
 		return nil, fmt.Errorf("failed to get global counts: %w", err)
 	}
 
@@ -521,7 +673,10 @@ func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, rowCallback fu
     `
 
 	rows, err := r.db.Pool.Query(ctx, q)
+
+	metrics.DBQueryDuration.WithLabelValues("report_strict_stream_data").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_strict_stream_data", "error").Inc()
 		return nil, fmt.Errorf("db get strict submissions error: %w", err)
 	}
 	defer rows.Close()
@@ -548,6 +703,7 @@ func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, rowCallback fu
 		var filesCount int
 
 		if err := rows.Scan(&username, &role, &subID, &subDate, &subType, &status, &taskName, &filesCount, &comment); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("report_strict_stream_data", "error").Inc()
 			return nil, fmt.Errorf("scan error in report: %w", err)
 		}
 
@@ -583,11 +739,13 @@ func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, rowCallback fu
 		}
 
 		if err := rowCallback(username, role, detail); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("report_strict_stream_data", "error").Inc()
 			return nil, fmt.Errorf("callback stopped execution: %w", err)
 		}
 	}
 
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_strict_stream_data", "error").Inc()
 		return nil, fmt.Errorf("rows iteration error: %w", err)
 	}
 
@@ -609,10 +767,12 @@ func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, rowCallback fu
 		data.HWNotesRatio = "0.0% / 0.0%"
 	}
 
+	metrics.DBQueriesTotal.WithLabelValues("report_strict_stream_data", "success").Inc()
 	return data, nil
 }
 
 func (r *repo) GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error) {
+	start := time.Now()
 	q := `
        SELECT 
           TO_CHAR(wr.created_at, 'YYYY-MM-DD HH24:MI') AS date,
@@ -627,7 +787,10 @@ func (r *repo) GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyRepor
     `
 
 	rows, err := r.db.Pool.Query(ctx, q)
+
+	metrics.DBQueryDuration.WithLabelValues("report_weekly").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_weekly", "error").Inc()
 		return nil, fmt.Errorf("db get weekly reports error: %w", err)
 	}
 	defer rows.Close()
@@ -636,33 +799,46 @@ func (r *repo) GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyRepor
 	for rows.Next() {
 		var rep report.WeeklyReportData
 		if err := rows.Scan(&rep.Date, &rep.StudentName, &rep.CuratorName, &rep.Text); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("report_weekly", "error").Inc()
 			return nil, fmt.Errorf("scan error: %w", err)
 		}
 		reports = append(reports, rep)
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_weekly", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("report_weekly", "success").Inc()
 	return reports, nil
 }
 
 func (r *repo) GetDailyAdminStatsText(ctx context.Context) (string, error) {
+	start := time.Now()
 	var newUsers, totalHW, totalNotes int
 
 	err := r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM users WHERE registration_date >= NOW() - INTERVAL '24 hours'`).Scan(&newUsers)
 	if err != nil {
+		metrics.DBQueryDuration.WithLabelValues("report_daily_stats").Observe(time.Since(start).Seconds())
+		metrics.DBQueriesTotal.WithLabelValues("report_daily_stats", "error").Inc()
 		return "", err
 	}
 
 	err = r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM submissions WHERE submission_date >= CURRENT_DATE AND submission_type = 'homework'`).Scan(&totalHW)
 	if err != nil {
+		metrics.DBQueryDuration.WithLabelValues("report_daily_stats").Observe(time.Since(start).Seconds())
+		metrics.DBQueriesTotal.WithLabelValues("report_daily_stats", "error").Inc()
 		return "", err
 	}
 
 	err = r.db.Pool.QueryRow(ctx, `SELECT COUNT(*) FROM submissions WHERE submission_date >= CURRENT_DATE AND submission_type = 'notes'`).Scan(&totalNotes)
 	if err != nil {
+		metrics.DBQueryDuration.WithLabelValues("report_daily_stats").Observe(time.Since(start).Seconds())
+		metrics.DBQueriesTotal.WithLabelValues("report_daily_stats", "error").Inc()
 		return "", err
 	}
+
+	metrics.DBQueryDuration.WithLabelValues("report_daily_stats").Observe(time.Since(start).Seconds())
+	metrics.DBQueriesTotal.WithLabelValues("report_daily_stats", "success").Inc()
 
 	text := fmt.Sprintf(
 		"📈 <b>Общий отчет за сегодня:</b>\n\n"+
@@ -675,6 +851,7 @@ func (r *repo) GetDailyAdminStatsText(ctx context.Context) (string, error) {
 }
 
 func (r *repo) GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error) {
+	start := time.Now()
 	q := `
        SELECT 
           COALESCE(c.first_name, '') || ' ' || COALESCE(c.last_name, 'Без куратора') AS curator_name,
@@ -694,7 +871,10 @@ func (r *repo) GetStudentSheetsReport(ctx context.Context) ([]report.StudentShee
     `
 
 	rows, err := r.db.Pool.Query(ctx, q)
+
+	metrics.DBQueryDuration.WithLabelValues("report_student_sheets").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_student_sheets", "error").Inc()
 		return nil, fmt.Errorf("db get student sheets error: %w", err)
 	}
 	defer rows.Close()
@@ -703,17 +883,21 @@ func (r *repo) GetStudentSheetsReport(ctx context.Context) ([]report.StudentShee
 	for rows.Next() {
 		var rec report.StudentSheetRecord
 		if err := rows.Scan(&rec.CuratorName, &rec.StudentName, &rec.Username, &rec.CourseName, &rec.HWCount, &rec.NotesCount, &rec.RegisteredAt); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("report_student_sheets", "error").Inc()
 			return nil, fmt.Errorf("scan error: %w", err)
 		}
 		records = append(records, rec)
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_student_sheets", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("report_student_sheets", "success").Inc()
 	return records, nil
 }
 
 func (r *repo) GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]report.UserStat, error) {
+	start := time.Now()
 	q := `
        SELECT 
           u.user_id, 
@@ -732,7 +916,10 @@ func (r *repo) GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]re
     `
 
 	rows, err := r.db.Pool.Query(ctx, q, curatorID)
+
+	metrics.DBQueryDuration.WithLabelValues("report_curator_stats").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_curator_stats", "error").Inc()
 		return nil, fmt.Errorf("db get curator stats error: %w", err)
 	}
 	defer rows.Close()
@@ -751,6 +938,7 @@ func (r *repo) GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]re
 			&stat.FilesCount,
 			&stat.RegisteredAt,
 		); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("report_curator_stats", "error").Inc()
 			return nil, fmt.Errorf("scan error: %w", err)
 		}
 
@@ -761,12 +949,15 @@ func (r *repo) GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]re
 		stats = append(stats, stat)
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_curator_stats", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("report_curator_stats", "success").Inc()
 	return stats, nil
 }
 
 func (r *repo) GetUsersStatsReport(ctx context.Context, courseID string) ([]report.UserStat, error) {
+	start := time.Now()
 	q := `
        SELECT 
           u.user_id, 
@@ -785,7 +976,10 @@ func (r *repo) GetUsersStatsReport(ctx context.Context, courseID string) ([]repo
     `
 
 	rows, err := r.db.Pool.Query(ctx, q, courseID)
+
+	metrics.DBQueryDuration.WithLabelValues("report_users_stats").Observe(time.Since(start).Seconds())
 	if err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_users_stats", "error").Inc()
 		return nil, fmt.Errorf("db get users stats error: %w", err)
 	}
 	defer rows.Close()
@@ -804,6 +998,7 @@ func (r *repo) GetUsersStatsReport(ctx context.Context, courseID string) ([]repo
 			&stat.FilesCount,
 			&stat.RegisteredAt,
 		); err != nil {
+			metrics.DBQueriesTotal.WithLabelValues("report_users_stats", "error").Inc()
 			return nil, fmt.Errorf("scan error: %w", err)
 		}
 
@@ -814,7 +1009,9 @@ func (r *repo) GetUsersStatsReport(ctx context.Context, courseID string) ([]repo
 		stats = append(stats, stat)
 	}
 	if err := rows.Err(); err != nil {
+		metrics.DBQueriesTotal.WithLabelValues("report_users_stats", "error").Inc()
 		return nil, err
 	}
+	metrics.DBQueriesTotal.WithLabelValues("report_users_stats", "success").Inc()
 	return stats, nil
 }

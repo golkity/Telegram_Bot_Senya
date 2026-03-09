@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"telegram_bot/internal/bot/keyboards"
+	"telegram_bot/pkg/metrics"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -26,6 +27,7 @@ func (h *Handler) HandleStudentJoinCourse(ctx context.Context, msg *tgbotapi.Mes
 	err = h.userSvc.SetUserCourse(ctx, msg.From.ID, course.ID)
 	if err != nil {
 		h.log.Error("failed to set user course", "user_id", msg.From.ID, "error", err)
+		metrics.ErrorsTotal.WithLabelValues("student_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка при записи на курс. Попробуйте позже.", nil)
 		return
 	}
@@ -57,6 +59,7 @@ func (h *Handler) HandleGetArchive(ctx context.Context, msg *tgbotapi.Message) {
 
 		if err != nil {
 			h.log.Error("failed to generate archive", "user_id", msg.From.ID, "error", err)
+			metrics.ErrorsTotal.WithLabelValues("student_handler").Inc()
 			h.SendMessage(msg.Chat.ID, "❌ Ошибка при создании архива. Попробуйте позже или обратитесь к администратору.", nil)
 			return
 		}
@@ -75,6 +78,7 @@ func (h *Handler) HandleDailyStatistics(ctx context.Context, msg *tgbotapi.Messa
 	stats, err := h.userSvc.GetDailyStats(ctx, msg.From.ID)
 	if err != nil {
 		h.log.Error("failed to get stats", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("student_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "⚠️ Не удалось загрузить статистику.", nil)
 		return
 	}
@@ -125,6 +129,7 @@ func (h *Handler) HandleStudentJoinCurator(ctx context.Context, msg *tgbotapi.Me
 
 	curators, err := h.userSvc.GetCuratorsByCourse(ctx, *u.CourseID)
 	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("student_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка при поиске кураторов.", nil)
 		return
 	}
@@ -145,6 +150,7 @@ func (h *Handler) HandleStudentJoinCurator(ctx context.Context, msg *tgbotapi.Me
 	err = h.userSvc.AssignCurator(ctx, msg.From.ID, targetCuratorID, *u.CourseID)
 	if err != nil {
 		h.log.Error("failed to assign curator", "user_id", msg.From.ID, "error", err)
+		metrics.ErrorsTotal.WithLabelValues("student_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка при сохранении куратора.", nil)
 		return
 	}

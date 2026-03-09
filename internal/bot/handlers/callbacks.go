@@ -8,6 +8,7 @@ import (
 
 	"telegram_bot/internal/modules/submission"
 	"telegram_bot/internal/modules/user"
+	"telegram_bot/pkg/metrics"
 
 	tgbotapi "github.com/go-telegram-bot-api/telegram-bot-api/v5"
 )
@@ -33,8 +34,11 @@ func (h *Handler) HandleCallback(ctx context.Context, callback *tgbotapi.Callbac
 	}
 	cmd := parts[0]
 
+	metrics.UpdatesTotal.WithLabelValues("callback_" + cmd).Inc()
+
 	initiator, err := h.userSvc.GetUserInfo(ctx, callback.From.ID)
 	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("bot_callback").Inc()
 		return
 	}
 
@@ -145,6 +149,7 @@ func (h *Handler) HandleCallback(ctx context.Context, callback *tgbotapi.Callbac
 func (h *Handler) showUserActions(ctx context.Context, chatID int64, targetID int64) {
 	u, err := h.userSvc.GetUserInfo(ctx, targetID)
 	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("bot_callback").Inc()
 		h.SendMessage(chatID, "Пользователь не найден", nil)
 		return
 	}
@@ -180,6 +185,7 @@ func (h *Handler) confirmDeleteUser(_ context.Context, chatID int64, targetID in
 func (h *Handler) executeDeleteUser(ctx context.Context, chatID int64, targetID int64) {
 	err := h.userSvc.DeleteUser(ctx, targetID)
 	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("bot_callback").Inc()
 		h.SendMessage(chatID, "❌ Ошибка при удалении пользователя", nil)
 		return
 	}
@@ -189,6 +195,7 @@ func (h *Handler) executeDeleteUser(ctx context.Context, chatID int64, targetID 
 func (h *Handler) showUserStats(ctx context.Context, chatID int64, targetID int64) {
 	stats, err := h.userSvc.GetDailyStats(ctx, targetID)
 	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("bot_callback").Inc()
 		h.SendMessage(chatID, "Нет данных", nil)
 		return
 	}
@@ -199,6 +206,7 @@ func (h *Handler) showUserStats(ctx context.Context, chatID int64, targetID int6
 func (h *Handler) executeSetRole(ctx context.Context, chatID int64, targetID int64, newRole string) {
 	err := h.userSvc.SetRole(ctx, targetID, user.Role(newRole))
 	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("bot_callback").Inc()
 		h.SendMessage(chatID, "Ошибка изменения роли", nil)
 		return
 	}
@@ -210,7 +218,10 @@ func (h *Handler) showCourseAssignment(_ context.Context, chatID int64, _ int64)
 }
 
 func (h *Handler) showCuratorAssignment(ctx context.Context, chatID int64, targetID int64) {
-	curators, _ := h.userSvc.GetAllCurators(ctx)
+	curators, err := h.userSvc.GetAllCurators(ctx)
+	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("bot_callback").Inc()
+	}
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, c := range curators {
 		data := fmt.Sprintf("do_assign_cur:%d:%d", targetID, c.ID)
@@ -275,6 +286,7 @@ func (h *Handler) showStudentSubmissionsForTask(ctx context.Context, chatID int6
 func (h *Handler) showSubmissionDetails(ctx context.Context, chatID int64, subID int64) {
 	sub, err := h.submissionSvc.GetSubmissionByID(ctx, subID)
 	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("bot_callback").Inc()
 		h.SendMessage(chatID, "Ошибка загрузки", nil)
 		return
 	}
@@ -299,15 +311,18 @@ func (h *Handler) showSubmissionDetails(ctx context.Context, chatID int64, subID
 func (h *Handler) sendSubmissionFile(ctx context.Context, chatID int64, subID int64, fileIndex int) {
 	sub, err := h.submissionSvc.GetSubmissionByID(ctx, subID)
 	if err != nil || fileIndex < 0 || fileIndex >= len(sub.FilePaths) {
+		metrics.ErrorsTotal.WithLabelValues("bot_callback").Inc()
 		h.SendMessage(chatID, "❌ Файл не найден", nil)
 		return
 	}
 
 	url, err := h.submissionSvc.GetFileLink(ctx, sub.FilePaths[fileIndex])
 	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("bot_callback").Inc()
 		h.SendMessage(chatID, "❌ Файл недоступен", nil)
 		return
 	}
+
 	msg := fmt.Sprintf("🔗 Ссылка на файл (действует 1 час):\n%s", url)
 	h.SendMessage(chatID, msg, nil)
 }
@@ -315,6 +330,7 @@ func (h *Handler) sendSubmissionFile(ctx context.Context, chatID int64, subID in
 func (h *Handler) attachDeveloper(ctx context.Context, devID int64, curatorID int64, chatID int64) {
 	err := h.userSvc.AssignCurator(ctx, devID, curatorID, "Годовой")
 	if err != nil {
+		metrics.ErrorsTotal.WithLabelValues("bot_callback").Inc()
 		h.SendMessage(chatID, "Ошибка прикрепления (возможно, не указан курс)", nil)
 		return
 	}
@@ -331,6 +347,7 @@ func (h *Handler) generateCuratorExcel(ctx context.Context, chatID int64, curato
 			"course_id", courseID,
 			"error", err,
 		)
+		metrics.ErrorsTotal.WithLabelValues("bot_callback").Inc()
 		h.SendMessage(chatID, "❌ Не удалось поставить задачу в очередь. Попробуйте позже.", nil)
 		return
 	}
