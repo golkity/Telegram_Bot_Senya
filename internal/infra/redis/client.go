@@ -18,9 +18,9 @@ func New(addr, password string, db int) (*Client, error) {
 		Password:     password,
 		DB:           db,
 		DialTimeout:  5 * time.Second,
-		ReadTimeout:  3 * time.Second,
-		WriteTimeout: 3 * time.Second,
-		PoolSize:     10,
+		ReadTimeout:  5 * time.Second,
+		WriteTimeout: 5 * time.Second,
+		PoolSize:     100,
 	})
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
