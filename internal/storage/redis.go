@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"log"
 	"time"
 
 	"telegram_bot/internal/bot/handlers"
@@ -34,14 +35,28 @@ func (r *RedisState) makeDataKey(userID int64) string {
 func (r *RedisState) SetState(userID int64, state handlers.UserState) {
 	ctx := context.Background()
 	key := r.makeStateKey(userID)
-	r.client.Set(ctx, key, int(state), r.ttl)
+
+	var err error
+	for i := 0; i < 3; i++ {
+		err = r.client.Set(ctx, key, int(state), r.ttl).Err()
+		if err == nil {
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	log.Printf("CRITICAL: failed to save state %d for user %d after 3 retries: %v", state, userID, err)
 }
 
 func (r *RedisState) GetState(userID int64) handlers.UserState {
 	ctx := context.Background()
 	key := r.makeStateKey(userID)
+
 	val, err := r.client.Get(ctx, key).Int()
 	if err != nil {
+		if err != redis.Nil {
+			log.Printf("CRITICAL: failed to get state for user %d: %v", userID, err)
+		}
 		return handlers.StateNone
 	}
 	return handlers.UserState(val)
@@ -59,11 +74,20 @@ func (r *RedisState) SetData(userID int64, key string, value interface{}) {
 
 	data, err := json.Marshal(value)
 	if err != nil {
+		log.Printf("ERROR: failed to marshal data for user %d: %v", userID, err)
 		return
 	}
 
-	r.client.HSet(ctx, redisKey, key, data)
-	r.client.Expire(ctx, redisKey, r.ttl)
+	for i := 0; i < 3; i++ {
+		err = r.client.HSet(ctx, redisKey, key, data).Err()
+		if err == nil {
+			r.client.Expire(ctx, redisKey, r.ttl)
+			return
+		}
+		time.Sleep(50 * time.Millisecond)
+	}
+
+	log.Printf("CRITICAL: failed to set data '%s' for user %d after 3 retries: %v", key, userID, err)
 }
 
 func (r *RedisState) GetData(userID int64, key string) interface{} {
