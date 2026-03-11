@@ -30,10 +30,10 @@ func (s *Service) SaveWeeklyReport(ctx context.Context, userID int64, text strin
 	return nil
 }
 
-func (s *Service) RequestReport(ctx context.Context, userID int64, reportType string) error {
+func (s *Service) RequestReport(ctx context.Context, userID int64, courseID string, reportType string) error {
 	select {
-	case s.taskChan <- Task{AdminChatID: userID, ReportType: reportType}:
-		s.log.Info("report task enqueued", "user_id", userID, "type", reportType)
+	case s.taskChan <- Task{AdminChatID: userID, CourseID: courseID, ReportType: reportType}:
+		s.log.Info("report task enqueued", "user_id", userID, "course", courseID, "type", reportType)
 	default:
 		metrics.ErrorsTotal.WithLabelValues("report_queue_full").Inc()
 		return fmt.Errorf("report queue is full")

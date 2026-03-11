@@ -91,6 +91,14 @@ func (h *Handler) HandleCallback(ctx context.Context, callback *tgbotapi.Callbac
 		targetID, _ := strconv.ParseInt(parts[1], 10, 64)
 		h.showCourseAssignment(ctx, callback.Message.Chat.ID, targetID)
 
+	case "gen_rep":
+		if len(parts) < 3 {
+			return
+		}
+		reportType := parts[1]
+		courseID := parts[2]
+		h.executeGenerateCuratorReport(ctx, callback.Message.Chat.ID, callback.From.ID, reportType, courseID)
+
 	case "assign_curator_menu":
 		if len(parts) < 2 {
 			return
@@ -350,5 +358,16 @@ func (h *Handler) generateCuratorExcel(ctx context.Context, chatID int64, curato
 		metrics.ErrorsTotal.WithLabelValues("bot_callback").Inc()
 		h.SendMessage(chatID, "❌ Не удалось поставить задачу в очередь. Попробуйте позже.", nil)
 		return
+	}
+}
+
+func (h *Handler) executeGenerateCuratorReport(ctx context.Context, chatID int64, curatorID int64, reportType, courseID string) {
+	h.SendMessage(chatID, fmt.Sprintf("⏳ Запуск генерации отчета по курсу «%s»...", courseID), nil)
+
+	err := h.reportSvc.RequestReport(ctx, curatorID, courseID, reportType)
+	if err != nil {
+		h.log.Error("failed to queue report", "error", err)
+		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
+		h.SendMessage(chatID, "❌ Очередь отчетов занята, попробуйте позже.", nil)
 	}
 }
