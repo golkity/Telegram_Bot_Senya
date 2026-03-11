@@ -25,7 +25,7 @@ type ReportGenerator interface {
 type DataProvider interface {
 	GetStats(ctx context.Context, courseID string) ([]report.UserStat, error)
 	StreamStrictSubmissionsReport(ctx context.Context, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error)
-	GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]report.UserStat, error)
+	GetCuratorStatsReport(ctx context.Context, curatorID int64, courseID string) ([]report.UserStat, error)
 	GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error)
 	GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error)
 }
@@ -112,7 +112,7 @@ func ProcessReportJob(
 		fileName = fmt.Sprintf("student_sheets_%s.xlsx", time.Now().Format("2006-01-02_15-04"))
 
 	default:
-		data, errGet := provider.GetCuratorStatsReport(ctx, task.AdminChatID)
+		data, errGet := provider.GetCuratorStatsReport(ctx, task.AdminChatID, task.CourseID)
 		if errGet != nil {
 			log.Error("failed to fetch stats", "error", errGet)
 			metrics.ErrorsTotal.WithLabelValues("report_worker").Inc()
@@ -121,12 +121,17 @@ func ProcessReportJob(
 		}
 
 		if len(data) == 0 {
-			_ = sender.SendFile(task.AdminChatID, nil, "", "📭 У вас пока нет учеников для формирования отчета.")
+			msg := "📭 У вас пока нет учеников для формирования отчета."
+			if task.CourseID != "" {
+				msg = fmt.Sprintf("📭 У вас нет учеников на курсе «%s».", task.CourseID)
+			}
+			_ = sender.SendFile(task.AdminChatID, nil, "", msg)
 			return
 		}
 
 		fileBytes, err = gen.GenerateStatsReport(data)
-		fileName = fmt.Sprintf("curator_report_%s.xlsx", time.Now().Format("2006-01-02_15-04"))
+
+		fileName = fmt.Sprintf("curator_%s_%s.xlsx", task.CourseID, time.Now().Format("2006-01-02_15-04"))
 	}
 
 	if err != nil {

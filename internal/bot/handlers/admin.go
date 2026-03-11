@@ -279,7 +279,7 @@ func (h *Handler) HandleAdminWeeklyReport(ctx context.Context, msg *tgbotapi.Mes
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
-	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "admin_weekly")
+	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "", "admin_weekly")
 	if err != nil {
 		return
 	}
@@ -291,7 +291,7 @@ func (h *Handler) HandleAdminDetailedExcel(ctx context.Context, msg *tgbotapi.Me
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
-	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "admin_detailed_excel")
+	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "", "admin_detailed_excel")
 	if err != nil {
 		return
 	}
@@ -303,7 +303,7 @@ func (h *Handler) HandleAdminWordReport(ctx context.Context, msg *tgbotapi.Messa
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
-	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "word_weekly")
+	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "", "word_weekly")
 	if err != nil {
 		return
 	}
@@ -315,7 +315,7 @@ func (h *Handler) HandleAdminSubmissionExcel(ctx context.Context, msg *tgbotapi.
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
-	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "excel_submissions")
+	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "", "excel_submissions")
 	if err != nil {
 		return
 	}
@@ -327,7 +327,7 @@ func (h *Handler) HandleAdminStudentSheets(ctx context.Context, msg *tgbotapi.Me
 	if !h.checkAdminPermission(ctx, msg.Chat.ID, msg.From.ID) {
 		return
 	}
-	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "admin_student_sheets")
+	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "", "admin_student_sheets")
 	if err != nil {
 		return
 	}

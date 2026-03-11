@@ -329,6 +329,6 @@ func (s *Service) GetStudentSheetsReport(ctx context.Context) ([]report.StudentS
 	return s.repo.GetStudentSheetsReport(ctx)
 }
 
-func (s *Service) GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]report.UserStat, error) {
-	return s.repo.GetCuratorStatsReport(ctx, curatorID)
+func (s *Service) GetCuratorStatsReport(ctx context.Context, curatorID int64, courseID string) ([]report.UserStat, error) {
+	return s.repo.GetCuratorStatsReport(ctx, curatorID, courseID)
 }

@@ -46,7 +46,7 @@ type Repository interface {
 	GetDailyAdminStatsText(ctx context.Context) (string, error)
 
 	GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error)
-	GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]report.UserStat, error)
+	GetCuratorStatsReport(ctx context.Context, curatorID int64, courseID string) ([]report.UserStat, error)
 }
 
 type repo struct {
@@ -896,26 +896,26 @@ func (r *repo) GetStudentSheetsReport(ctx context.Context) ([]report.StudentShee
 	return records, nil
 }
 
-func (r *repo) GetCuratorStatsReport(ctx context.Context, curatorID int64) ([]report.UserStat, error) {
+func (r *repo) GetCuratorStatsReport(ctx context.Context, curatorID int64, courseID string) ([]report.UserStat, error) {
 	start := time.Now()
 	q := `
-       SELECT 
-          u.user_id, 
-          TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS name,
-          COALESCE(ur.role, 'student') AS role,
-          COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
-          COUNT(s.id) FILTER (WHERE s.submission_type = 'notes') AS notes_count,
-          COUNT(s.id) AS total_files,
-          u.registration_date
-       FROM users u
-       JOIN user_roles ur ON u.user_id = ur.user_id
-       LEFT JOIN submissions s ON u.user_id = s.user_id AND s.submission_date >= NOW() - INTERVAL '7 days'
-       WHERE ur.curator_id = $1
-       GROUP BY u.user_id, u.first_name, u.last_name, ur.role, u.registration_date
-       ORDER BY u.registration_date DESC
-    `
+		SELECT 
+			u.user_id, 
+			TRIM(COALESCE(u.first_name, '') || ' ' || COALESCE(u.last_name, '')) AS name,
+			COALESCE(ur.role, 'student') AS role,
+			COUNT(s.id) FILTER (WHERE s.submission_type = 'homework') AS hw_count,
+			COUNT(s.id) FILTER (WHERE s.submission_type = 'notes') AS notes_count,
+			COUNT(s.id) AS total_files,
+			u.registration_date
+		FROM users u
+		JOIN user_roles ur ON u.user_id = ur.user_id
+		LEFT JOIN submissions s ON u.user_id = s.user_id AND s.submission_date >= NOW() - INTERVAL '7 days'
+		WHERE ur.curator_id = $1 AND ($2::text = '' OR ur.course_id = $2)
+		GROUP BY u.user_id, u.first_name, u.last_name, ur.role, u.registration_date
+		ORDER BY u.registration_date DESC
+	`
 
-	rows, err := r.db.Pool.Query(ctx, q, curatorID)
+	rows, err := r.db.Pool.Query(ctx, q, curatorID, courseID)
 
 	metrics.DBQueryDuration.WithLabelValues("report_curator_stats").Observe(time.Since(start).Seconds())
 	if err != nil {

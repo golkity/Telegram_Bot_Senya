@@ -67,66 +67,6 @@ func (h *Handler) HandleCuratorReminder(ctx context.Context, msg *tgbotapi.Messa
 	h.SendMessage(msg.Chat.ID, "📝 Введите текст напоминания для всех ваших студентов:", keyboards.CancelButton)
 }
 
-func (h *Handler) HandleCuratorDailyReport(ctx context.Context, msg *tgbotapi.Message) {
-	h.deleteUserMessage(msg)
-	h.SendMessage(msg.Chat.ID, "📊 Генерирую ежедневный отчет по вашим студентам...", nil)
-
-	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "curator_daily")
-	if err != nil {
-		h.log.Error("failed to queue report", "error", err)
-		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
-		h.SendMessage(msg.Chat.ID, "❌ Очередь занята, попробуйте позже.", nil)
-	}
-}
-
-func (h *Handler) HandleCuratorWeeklyReport(ctx context.Context, msg *tgbotapi.Message) {
-	h.deleteUserMessage(msg)
-	h.SendMessage(msg.Chat.ID, "📈 Генерирую еженедельный отчет...", nil)
-
-	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "curator_weekly")
-	if err != nil {
-		h.log.Error("failed to queue report", "error", err)
-		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
-		h.SendMessage(msg.Chat.ID, "❌ Очередь занята, попробуйте позже.", nil)
-	}
-}
-
-func (h *Handler) HandleWordReport(ctx context.Context, msg *tgbotapi.Message) {
-	h.deleteUserMessage(msg)
-	h.SendMessage(msg.Chat.ID, "⏳ Генерирую Word-отчет (еженедельный)...", nil)
-
-	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "word_weekly")
-	if err != nil {
-		h.log.Error("failed to queue report", "error", err)
-		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
-		h.SendMessage(msg.Chat.ID, "❌ Очередь занята, попробуйте позже.", nil)
-	}
-}
-
-func (h *Handler) HandleSubmissionReportExcel(ctx context.Context, msg *tgbotapi.Message) {
-	h.deleteUserMessage(msg)
-	h.SendMessage(msg.Chat.ID, "⏳ Генерирую детальный Excel по сдачам...", nil)
-
-	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "excel_submissions")
-	if err != nil {
-		h.log.Error("failed to queue report", "error", err)
-		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
-		h.SendMessage(msg.Chat.ID, "❌ Очередь занята, попробуйте позже.", nil)
-	}
-}
-
-func (h *Handler) HandleSummaryExcel(ctx context.Context, msg *tgbotapi.Message) {
-	h.deleteUserMessage(msg)
-	h.SendMessage(msg.Chat.ID, "⏳ Генерирую сводную таблицу Excel...", nil)
-
-	err := h.reportSvc.RequestReport(ctx, msg.From.ID, "excel_summary")
-	if err != nil {
-		h.log.Error("failed to queue report", "error", err)
-		metrics.ErrorsTotal.WithLabelValues("curator_handler").Inc()
-		h.SendMessage(msg.Chat.ID, "❌ Очередь занята, попробуйте позже.", nil)
-	}
-}
-
 func (h *Handler) HandleViewStudentWorks(ctx context.Context, msg *tgbotapi.Message) {
 	h.deleteUserMessage(msg)
 
@@ -164,4 +104,47 @@ func (h *Handler) HandleViewStudentWorks(ctx context.Context, msg *tgbotapi.Mess
 
 	markup := tgbotapi.NewInlineKeyboardMarkup(rows...)
 	h.SendMessage(msg.Chat.ID, "👤 Выберите ученика для просмотра работ:", markup)
+}
+
+func (h *Handler) sendCourseSelectionForReport(ctx context.Context, chatID int64, reportType string, text string) {
+	courses, err := h.userSvc.GetAllCourses(ctx)
+	if err != nil {
+		h.SendMessage(chatID, "❌ Ошибка получения списка курсов.", nil)
+		return
+	}
+
+	var rows [][]tgbotapi.InlineKeyboardButton
+	for _, c := range courses {
+		data := fmt.Sprintf("gen_rep:%s:%s", reportType, c)
+		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
+			tgbotapi.NewInlineKeyboardButtonData(c, data),
+		))
+	}
+
+	h.SendMessage(chatID, text+"\n📂 Выберите курс:", tgbotapi.NewInlineKeyboardMarkup(rows...))
+}
+
+func (h *Handler) HandleCuratorDailyReport(ctx context.Context, msg *tgbotapi.Message) {
+	h.deleteUserMessage(msg)
+	h.sendCourseSelectionForReport(ctx, msg.Chat.ID, "curator_daily", "📊 Генерация ежедневного отчета.")
+}
+
+func (h *Handler) HandleCuratorWeeklyReport(ctx context.Context, msg *tgbotapi.Message) {
+	h.deleteUserMessage(msg)
+	h.sendCourseSelectionForReport(ctx, msg.Chat.ID, "curator_weekly", "📈 Генерация еженедельного отчета.")
+}
+
+func (h *Handler) HandleWordReport(ctx context.Context, msg *tgbotapi.Message) {
+	h.deleteUserMessage(msg)
+	h.sendCourseSelectionForReport(ctx, msg.Chat.ID, "word_weekly", "📝 Генерация Word-отчета.")
+}
+
+func (h *Handler) HandleSubmissionReportExcel(ctx context.Context, msg *tgbotapi.Message) {
+	h.deleteUserMessage(msg)
+	h.sendCourseSelectionForReport(ctx, msg.Chat.ID, "excel_submissions", "🗂 Генерация детального Excel по сдачам.")
+}
+
+func (h *Handler) HandleSummaryExcel(ctx context.Context, msg *tgbotapi.Message) {
+	h.deleteUserMessage(msg)
+	h.sendCourseSelectionForReport(ctx, msg.Chat.ID, "excel_summary", "📑 Генерация сводной таблицы Excel.")
 }
