@@ -227,7 +227,11 @@ func (h *Handler) HandleFileUpload(_ context.Context, msg *tgbotapi.Message) {
 func (h *Handler) HandleSubmissionDone(ctx context.Context, msg *tgbotapi.Message) {
 	h.deleteUserMessage(msg)
 	userID := msg.From.ID
+
+	mu := getUserLock(userID)
+	mu.Lock()
 	rawFiles := h.state.GetData(userID, "files")
+	mu.Unlock()
 
 	if rawFiles == nil {
 		h.SendMessage(msg.Chat.ID, "❌ Вы не прикрепили ни одного файла. Сдача невозможна.", keyboards.SubmissionProcessMenu)
@@ -235,6 +239,7 @@ func (h *Handler) HandleSubmissionDone(ctx context.Context, msg *tgbotapi.Messag
 	}
 
 	var files []submission.FileDTO
+	parsingFailed := false
 
 	if f, ok := rawFiles.([]submission.FileDTO); ok {
 		files = f
@@ -254,14 +259,23 @@ func (h *Handler) HandleSubmissionDone(ctx context.Context, msg *tgbotapi.Messag
 				}
 
 				files = append(files, file)
+			} else {
+				parsingFailed = true
 			}
 		}
+	} else {
+		parsingFailed = true
 	}
 
-	if len(files) == 0 {
+	if parsingFailed {
 		h.log.Error("failed to parse files from state", "rawFiles_type", fmt.Sprintf("%T", rawFiles), "data", rawFiles)
 		metrics.ErrorsTotal.WithLabelValues("submission_handler").Inc()
 		h.SendMessage(msg.Chat.ID, "❌ Ошибка чтения файлов из памяти. Пожалуйста, начните сдачу заново.", keyboards.SubmissionProcessMenu)
+		return
+	}
+
+	if len(files) == 0 {
+		h.SendMessage(msg.Chat.ID, "❌ Вы не прикрепили ни одного файла. Отправьте фото или документы, а затем нажмите 'Готово'.", keyboards.SubmissionProcessMenu)
 		return
 	}
 
@@ -345,19 +359,30 @@ func (h *Handler) HandleSubmissionFinalize(ctx context.Context, msg *tgbotapi.Me
 	u, _ := h.userSvc.GetUserInfo(ctx, userID)
 	studentName := "Unknown_Student"
 	courseName := "Unknown_Course"
+
 	if u != nil {
 		studentName = strings.TrimSpace(u.FirstName + " " + u.LastName)
 		if u.CourseID != nil {
 			courseName = *u.CourseID
 		}
+		if curatorID == 0 && u.CuratorID != nil {
+			curatorID = *u.CuratorID
+		}
+	}
+
+	if curatorID == 0 {
+		h.log.Error("submission save failed: curator_id is 0", "user_id", userID)
+		metrics.ErrorsTotal.WithLabelValues("submission_handler").Inc()
+		h.SendMessage(msg.Chat.ID, "❌ Ошибка: не удалось определить вашего куратора. Пожалуйста, выберите куратора в меню /start и попробуйте сдать работу снова.", keyboards.StudentMenu)
+		h.state.ClearState(userID)
+		h.state.ClearData(userID)
+		return
 	}
 
 	curatorName := "Unknown_Curator"
-	if curatorID != 0 {
-		c, _ := h.userSvc.GetUserInfo(ctx, curatorID)
-		if c != nil {
-			curatorName = strings.TrimSpace(c.FirstName + " " + c.LastName)
-		}
+	c, _ := h.userSvc.GetUserInfo(ctx, curatorID)
+	if c != nil {
+		curatorName = strings.TrimSpace(c.FirstName + " " + c.LastName)
 	}
 
 	input := submission.InputDTO{
