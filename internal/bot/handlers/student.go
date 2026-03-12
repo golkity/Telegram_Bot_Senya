@@ -160,3 +160,16 @@ func (h *Handler) HandleStudentJoinCurator(ctx context.Context, msg *tgbotapi.Me
 	h.SendMessage(msg.Chat.ID, "✅ Куратор успешно выбран!", nil)
 	h.SendMessage(msg.Chat.ID, fmt.Sprintf("👋 С возвращением, %s! Выбери действие:", u.FirstName), keyboards.StudentMenu)
 }
+
+func (h *Handler) HandleTaskStatus(ctx context.Context, msg *tgbotapi.Message, isDone bool) {
+	h.deleteUserMessage(msg)
+
+	var response string
+	if isDone {
+		response = "🎉 Молодец! Отметка о выполнении принята."
+	} else {
+		response = "💪 Ничего страшного, попробуй еще раз позже!"
+	}
+
+	h.SendMessage(msg.Chat.ID, response, nil)
+}
