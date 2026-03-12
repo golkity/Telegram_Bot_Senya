@@ -197,6 +197,10 @@ func (r *Router) handleMessage(ctx context.Context, msg *tgbotapi.Message) {
 		r.handler.HandleDeleteConfirm(ctx, msg)
 	case "❌ Нет, отмена":
 		r.handler.HandleDeleteConfirm(ctx, msg)
+	case "✅ Выполнил(а)":
+		r.handler.HandleTaskStatus(ctx, msg, true)
+	case "❌ Не выполнил(а)":
+		r.handler.HandleTaskStatus(ctx, msg, false)
 
 	case "👥 Перенести всех учеников куратора":
 		r.handler.HandleStartTransferByCurator(ctx, msg)
