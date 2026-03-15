@@ -26,7 +26,7 @@ type DataProvider interface {
 	GetStats(ctx context.Context, courseID string) ([]report.UserStat, error)
 	StreamStrictSubmissionsReport(ctx context.Context, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error)
 	GetCuratorStatsReport(ctx context.Context, curatorID int64, courseID string) ([]report.UserStat, error)
-	GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error)
+	GetWeeklyReportsReport(ctx context.Context, courseID string, curatorID int64) ([]report.WeeklyReportData, error)
 	GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error)
 }
 
@@ -82,8 +82,13 @@ func ProcessReportJob(
 		fileBytes, err = stream.Finish(headerData)
 		fileName = fmt.Sprintf("submissions_%s.xlsx", time.Now().Format("2006-01-02_15-04"))
 
-	case "admin_weekly":
-		data, errGet := provider.GetWeeklyReportsReport(ctx)
+	case "admin_weekly", "curator_weekly":
+		var curatorID int64 = 0
+		if task.ReportType == "curator_weekly" {
+			curatorID = task.AdminChatID
+		}
+
+		data, errGet := provider.GetWeeklyReportsReport(ctx, task.CourseID, curatorID)
 		if errGet != nil {
 			log.Error("failed to fetch weekly reports", "error", errGet)
 			metrics.ErrorsTotal.WithLabelValues("report_worker").Inc()
@@ -91,8 +96,22 @@ func ProcessReportJob(
 			return
 		}
 
+		if len(data) == 0 {
+			msg := "📭 За эту неделю отчетов пока нет."
+			if task.CourseID != "" {
+				msg = fmt.Sprintf("📭 Нет отчетов на курсе «%s».", task.CourseID)
+			}
+			_ = sender.SendFile(task.AdminChatID, nil, "", msg)
+			return
+		}
+
 		fileBytes, err = gen.GenerateWeeklyReportsExcel(data)
-		fileName = fmt.Sprintf("weekly_reports_%s.xlsx", time.Now().Format("2006-01-02_15-04"))
+
+		prefix := "admin_weekly"
+		if task.ReportType == "curator_weekly" {
+			prefix = "curator_weekly"
+		}
+		fileName = fmt.Sprintf("%s_%s_%s.xlsx", prefix, task.CourseID, time.Now().Format("2006-01-02_15-04"))
 
 	case "admin_student_sheets":
 		data, errGet := provider.GetStudentSheetsReport(ctx)

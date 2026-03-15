@@ -42,7 +42,7 @@ type Repository interface {
 
 	GetSubmissionsReport(ctx context.Context) ([]report.SubmissionStat, error)
 	StreamStrictSubmissionsReport(ctx context.Context, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error)
-	GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error)
+	GetWeeklyReportsReport(ctx context.Context, courseID string, curatorID int64) ([]report.WeeklyReportData, error)
 	GetDailyAdminStatsText(ctx context.Context) (string, error)
 
 	GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error)
@@ -771,7 +771,7 @@ func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, rowCallback fu
 	return data, nil
 }
 
-func (r *repo) GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error) {
+func (r *repo) GetWeeklyReportsReport(ctx context.Context, courseID string, curatorID int64) ([]report.WeeklyReportData, error) {
 	start := time.Now()
 	q := `
        SELECT 
@@ -783,10 +783,12 @@ func (r *repo) GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyRepor
        JOIN users u ON wr.user_id = u.user_id
        LEFT JOIN user_roles ur ON u.user_id = ur.user_id
        LEFT JOIN users c ON ur.curator_id = c.user_id
+       WHERE ($1::text = '' OR ur.course_id = $1)
+         AND ($2::bigint = 0 OR ur.curator_id = $2)
        ORDER BY wr.created_at DESC
     `
 
-	rows, err := r.db.Pool.Query(ctx, q)
+	rows, err := r.db.Pool.Query(ctx, q, courseID, curatorID)
 
 	metrics.DBQueryDuration.WithLabelValues("report_weekly").Observe(time.Since(start).Seconds())
 	if err != nil {

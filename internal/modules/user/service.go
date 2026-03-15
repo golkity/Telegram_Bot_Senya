@@ -317,8 +317,8 @@ func (s *Service) StreamStrictSubmissionsReport(ctx context.Context, rowCallback
 	return s.repo.StreamStrictSubmissionsReport(ctx, rowCallback)
 }
 
-func (s *Service) GetWeeklyReportsReport(ctx context.Context) ([]report.WeeklyReportData, error) {
-	return s.repo.GetWeeklyReportsReport(ctx)
+func (s *Service) GetWeeklyReportsReport(ctx context.Context, courseID string, curatorID int64) ([]report.WeeklyReportData, error) {
+	return s.repo.GetWeeklyReportsReport(ctx, courseID, curatorID)
 }
 
 func (s *Service) GetDailyAdminStatsText(ctx context.Context) (string, error) {
