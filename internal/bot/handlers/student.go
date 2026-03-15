@@ -163,13 +163,14 @@ func (h *Handler) HandleStudentJoinCurator(ctx context.Context, msg *tgbotapi.Me
 
 func (h *Handler) HandleTaskStatus(ctx context.Context, msg *tgbotapi.Message, isDone bool) {
 	h.deleteUserMessage(msg)
+	h.state.ClearState(msg.From.ID)
 
 	var response string
 	if isDone {
-		response = "🎉 Молодец! Отметка о выполнении принята."
+		response = "🎉 Молодец! Отметка о выполнении принята.\n\nВозвращаю в главное меню 👇"
 	} else {
-		response = "💪 Ничего страшного, попробуй еще раз позже!"
+		response = "💪 Ничего страшного, обязательно получится в следующий раз!\n\nВозвращаю в главное меню 👇"
 	}
 
-	h.SendMessage(msg.Chat.ID, response, nil)
+	h.SendCleanMessage(msg.Chat.ID, response, keyboards.StudentMenu)
 }
