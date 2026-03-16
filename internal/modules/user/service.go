@@ -332,3 +332,7 @@ func (s *Service) GetStudentSheetsReport(ctx context.Context) ([]report.StudentS
 func (s *Service) GetCuratorStatsReport(ctx context.Context, curatorID int64, courseID string) ([]report.UserStat, error) {
 	return s.repo.GetCuratorStatsReport(ctx, curatorID, courseID)
 }
+
+func (s *Service) GetCourseIDByName(ctx context.Context, name string) (string, error) {
+	return s.repo.GetCourseIDByName(ctx, name)
+}

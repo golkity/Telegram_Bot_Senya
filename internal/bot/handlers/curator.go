@@ -115,7 +115,12 @@ func (h *Handler) sendCourseSelectionForReport(ctx context.Context, chatID int64
 
 	var rows [][]tgbotapi.InlineKeyboardButton
 	for _, c := range courses {
-		data := fmt.Sprintf("gen_rep:%s:%s", reportType, c)
+		courseID, err := h.userSvc.GetCourseIDByName(ctx, c)
+		if err != nil || courseID == "" {
+			courseID = c
+		}
+
+		data := fmt.Sprintf("gen_rep:%s:%s", reportType, courseID)
 		rows = append(rows, tgbotapi.NewInlineKeyboardRow(
 			tgbotapi.NewInlineKeyboardButtonData(c, data),
 		))
