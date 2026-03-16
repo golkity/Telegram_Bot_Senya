@@ -24,7 +24,8 @@ type ReportGenerator interface {
 
 type DataProvider interface {
 	GetStats(ctx context.Context, courseID string) ([]report.UserStat, error)
-	StreamStrictSubmissionsReport(ctx context.Context, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error)
+	StreamStrictSubmissionsReport(ctx context.Context, courseID string, curatorID int64, rowCallback func(username,
+		role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error)
 	GetCuratorStatsReport(ctx context.Context, curatorID int64, courseID string) ([]report.UserStat, error)
 	GetWeeklyReportsReport(ctx context.Context, courseID string, curatorID int64) ([]report.WeeklyReportData, error)
 	GetStudentSheetsReport(ctx context.Context) ([]report.StudentSheetRecord, error)
@@ -62,7 +63,12 @@ func ProcessReportJob(
 		fileBytes, err = gen.GenerateStatsReport(data)
 		fileName = fmt.Sprintf("users_report_%s.xlsx", time.Now().Format("2006-01-02_15-04"))
 
-	case "excel_submissions":
+	case "excel_submissions", "curator_excel_submissions":
+		var curatorID int64 = 0
+		if task.ReportType == "curator_excel_submissions" {
+			curatorID = task.AdminChatID
+		}
+
 		stream, errGen := gen.NewStrictSubmissionsStream()
 		if errGen != nil {
 			log.Error("failed to init strict submissions stream", "error", errGen)
@@ -71,7 +77,8 @@ func ProcessReportJob(
 			return
 		}
 
-		headerData, errGet := provider.StreamStrictSubmissionsReport(ctx, stream.WriteRow)
+		// Передаем курс и куратора в провайдер данных
+		headerData, errGet := provider.StreamStrictSubmissionsReport(ctx, task.CourseID, curatorID, stream.WriteRow)
 		if errGet != nil {
 			log.Error("failed to stream strict submissions", "error", errGet)
 			metrics.ErrorsTotal.WithLabelValues("report_worker").Inc()
@@ -80,7 +87,7 @@ func ProcessReportJob(
 		}
 
 		fileBytes, err = stream.Finish(headerData)
-		fileName = fmt.Sprintf("submissions_%s.xlsx", time.Now().Format("2006-01-02_15-04"))
+		fileName = fmt.Sprintf("submissions_%s_%s.xlsx", task.CourseID, time.Now().Format("2006-01-02_15-04"))
 
 	case "admin_weekly", "curator_weekly":
 		var curatorID int64 = 0
