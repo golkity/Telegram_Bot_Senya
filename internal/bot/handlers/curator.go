@@ -146,7 +146,15 @@ func (h *Handler) HandleWordReport(ctx context.Context, msg *tgbotapi.Message) {
 
 func (h *Handler) HandleSubmissionReportExcel(ctx context.Context, msg *tgbotapi.Message) {
 	h.deleteUserMessage(msg)
-	h.sendCourseSelectionForReport(ctx, msg.Chat.ID, "excel_submissions", "🗂 Генерация детального Excel по сдачам.")
+
+	u, err := h.userSvc.GetUserInfo(ctx, msg.From.ID)
+	reportType := "excel_submissions"
+
+	if err == nil && u != nil && u.Role == user.RoleCurator {
+		reportType = "curator_excel_submissions"
+	}
+
+	h.sendCourseSelectionForReport(ctx, msg.Chat.ID, reportType, "🗂 Генерация детального Excel по сдачам.")
 }
 
 func (h *Handler) HandleSummaryExcel(ctx context.Context, msg *tgbotapi.Message) {

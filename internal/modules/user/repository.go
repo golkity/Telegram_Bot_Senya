@@ -41,7 +41,7 @@ type Repository interface {
 	GetUsersStatsReport(ctx context.Context, courseID string) ([]report.UserStat, error)
 
 	GetSubmissionsReport(ctx context.Context) ([]report.SubmissionStat, error)
-	StreamStrictSubmissionsReport(ctx context.Context, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error)
+	StreamStrictSubmissionsReport(ctx context.Context, courseID string, curatorID int64, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error)
 	GetWeeklyReportsReport(ctx context.Context, courseID string, curatorID int64) ([]report.WeeklyReportData, error)
 	GetDailyAdminStatsText(ctx context.Context) (string, error)
 
@@ -639,16 +639,20 @@ func (r *repo) GetSubmissionsReport(ctx context.Context) ([]report.SubmissionSta
 	return stats, nil
 }
 
-func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error) {
+func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, courseID string, curatorID int64, rowCallback func(username, role string, detail report.SubmissionDetail) error) (*report.StrictReportData, error) {
 	start := time.Now()
+
 	var totalUsers, courseStudents, courseDevs int
 	err := r.db.Pool.QueryRow(ctx, `
        SELECT 
           COUNT(*),
           COUNT(*) FILTER (WHERE role = 'student'),
           COUNT(*) FILTER (WHERE role = 'developer')
-       FROM user_roles
-    `).Scan(&totalUsers, &courseStudents, &courseDevs)
+       FROM user_roles ur
+       WHERE ($1::text = '' OR ur.course_id = $1)
+         AND ($2::bigint = 0 OR ur.curator_id = $2)
+    `, courseID, curatorID).Scan(&totalUsers, &courseStudents, &courseDevs)
+
 	if err != nil {
 		metrics.DBQueriesTotal.WithLabelValues("report_strict_stream_count", "error").Inc()
 		return nil, fmt.Errorf("failed to get global counts: %w", err)
@@ -669,10 +673,12 @@ func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, rowCallback fu
        JOIN users u ON s.user_id = u.user_id
        LEFT JOIN user_roles ur ON u.user_id = ur.user_id
        LEFT JOIN subtask_mappings sm ON s.task_number = sm.subtask_code
+       WHERE ($1::text = '' OR ur.course_id = $1)
+         AND ($2::bigint = 0 OR ur.curator_id = $2)
        ORDER BY username, s.submission_date DESC
     `
 
-	rows, err := r.db.Pool.Query(ctx, q)
+	rows, err := r.db.Pool.Query(ctx, q, courseID, curatorID)
 
 	metrics.DBQueryDuration.WithLabelValues("report_strict_stream_data").Observe(time.Since(start).Seconds())
 	if err != nil {
@@ -681,14 +687,19 @@ func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, rowCallback fu
 	}
 	defer rows.Close()
 
+	cName := courseID
+	if cName == "" {
+		cName = "Все курсы"
+	}
+
 	data := &report.StrictReportData{
-		ReportTitle:    "ИСТОРИЯ СДАЧ (ГЛОБАЛЬНЫЙ ОТЧЕТ)",
+		ReportTitle:    "ИСТОРИЯ СДАЧ",
 		GenerationDate: time.Now().Format("02.01.2006 15:04"),
-		CourseName:     "Все курсы",
-		CuratorName:    "Все кураторы",
+		CourseName:     cName,
+		CuratorName:    "Фильтр применен",
 		Period:         "За всё время",
 		WeekType:       "—",
-		CourseFilter:   "НЕТ",
+		CourseFilter:   cName,
 		TotalUsers:     totalUsers,
 		CourseStudents: courseStudents,
 		CourseDevs:     courseDevs,
@@ -752,7 +763,7 @@ func (r *repo) StreamStrictSubmissionsReport(ctx context.Context, rowCallback fu
 	data.ActiveStudents = len(activeStudentsMap)
 	data.ActiveDevs = len(activeDevsMap)
 	data.DaysInPeriod = "За всё время"
-	data.ReportTypeStat = "Глобальная выгрузка"
+	data.ReportTypeStat = "Выгрузка по фильтру"
 
 	if data.TotalUsers > 0 {
 		data.AvgSubmissions = float64(data.TotalSubmissions) / float64(data.TotalUsers)
